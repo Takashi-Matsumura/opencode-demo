@@ -105,3 +105,7 @@ opencode.json                    llama.cpp プロバイダ設定
 | ws | MIT |
 
 OpenCode 本体は MIT、llama.cpp は MIT、Gemma モデルは Google の利用規約に従ってください。
+
+## このプロジェクトのライセンス
+
+[MIT License](./LICENSE) — Copyright (c) 2026 Takashi Matsumura

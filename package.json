@@ -2,6 +2,8 @@
   "name": "opencode-demo",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
+  "author": "Takashi Matsumura",
   "scripts": {
     "dev": "next dev",
     "dev:pty": "tsx server/pty-server.ts",
