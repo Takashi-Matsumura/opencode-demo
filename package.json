@@ -4,23 +4,33 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:pty": "tsx server/pty-server.ts",
+    "dev:all": "concurrently -n next,pty -c cyan,magenta \"npm:dev\" \"npm:dev:pty\"",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
   },
   "dependencies": {
+    "@excalidraw/excalidraw": "^0.18.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "next": "16.2.3",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },
   "devDependencies": {
+    "@homebridge/node-pty-prebuilt-multiarch": "^0.12.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/ws": "^8.18.1",
+    "concurrently": "^9.2.1",
     "eslint": "^9",
     "eslint-config-next": "16.2.3",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "tsx": "^4.21.0",
+    "typescript": "^5",
+    "ws": "^8.20.0"
   }
 }
