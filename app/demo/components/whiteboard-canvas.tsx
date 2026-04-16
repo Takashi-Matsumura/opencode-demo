@@ -1,15 +1,49 @@
 "use client";
 
+import { useEffect, useState, type MutableRefObject } from "react";
 import { Excalidraw } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
 
 export type View = { x: number; y: number; zoom: number };
 
+export type SceneRect = { x: number; y: number; w: number; h: number };
+
+export type ZoomToRectFn = (rect: SceneRect) => void;
+
 export default function WhiteboardCanvas({
   onView,
+  zoomRef,
 }: {
   onView?: (v: View) => void;
+  zoomRef?: MutableRefObject<ZoomToRectFn | null>;
 }) {
+  const [api, setApi] = useState<{
+    updateScene: (opts: {
+      appState: { scrollX: number; scrollY: number; zoom: { value: number } };
+    }) => void;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!zoomRef || !api) return;
+    zoomRef.current = (rect) => {
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const zoom = Math.min((vw * 0.8) / rect.w, (vh * 0.8) / rect.h);
+      const cx = rect.x + rect.w / 2;
+      const cy = rect.y + rect.h / 2;
+      api.updateScene({
+        appState: {
+          scrollX: vw / (2 * zoom) - cx,
+          scrollY: vh / (2 * zoom) - cy,
+          zoom: { value: zoom },
+        },
+      });
+    };
+    return () => {
+      zoomRef.current = null;
+    };
+  }, [api, zoomRef]);
+
   return (
     <div
       style={{ position: "absolute", inset: 0 }}
@@ -27,6 +61,7 @@ export default function WhiteboardCanvas({
       `}</style>
       <Excalidraw
         gridModeEnabled
+        excalidrawAPI={(a) => setApi(a as typeof api)}
         onScrollChange={(scrollX, scrollY, zoom) =>
           onView?.({ x: scrollX, y: scrollY, zoom: zoom.value })
         }

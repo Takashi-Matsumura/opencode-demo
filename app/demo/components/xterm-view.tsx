@@ -6,7 +6,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { PTY_WS_URL, type ClientMessage } from "../lib/ws-protocol";
 
-export default function XtermView() {
+export default function XtermView({ cwd }: { cwd?: string | null }) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -33,7 +33,9 @@ export default function XtermView() {
     const textarea = el.querySelector("textarea");
     textarea?.blur();
 
-    const ws = new WebSocket(PTY_WS_URL);
+    const base = PTY_WS_URL.replace(/\/+$/, "");
+    const url = cwd ? `${base}/?cwd=${encodeURIComponent(cwd)}` : base;
+    const ws = new WebSocket(url);
     ws.binaryType = "arraybuffer";
 
     const send = (msg: ClientMessage) => {
@@ -77,7 +79,7 @@ export default function XtermView() {
       ws.close();
       term.dispose();
     };
-  }, []);
+  }, [cwd]);
 
   return (
     <div

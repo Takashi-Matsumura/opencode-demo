@@ -2,14 +2,27 @@
 
 import { useEffect, useRef, useState, type PointerEvent } from "react";
 import dynamic from "next/dynamic";
-import type { View } from "./whiteboard-canvas";
+import { X, Minus, Maximize2 } from "lucide-react";
+import type { View, SceneRect } from "./whiteboard-canvas";
 
 const XtermView = dynamic(() => import("./xterm-view"), { ssr: false });
 
 type ScenePos = { x: number; y: number };
 type SceneSize = { w: number; h: number };
 
-export default function FloatingTerminal({ view }: { view: View }) {
+export type TerminalSession = { cwd: string; nonce: number };
+
+export default function FloatingTerminal({
+  view,
+  session,
+  onStop,
+  onZoomToFit,
+}: {
+  view: View;
+  session: TerminalSession | null;
+  onStop: () => void;
+  onZoomToFit?: (rect: SceneRect) => void;
+}) {
   const [scenePos, setScenePos] = useState<ScenePos>({ x: 80, y: 80 });
   const [sceneSize, setSceneSize] = useState<SceneSize>({ w: 720, h: 440 });
   const [minimized, setMinimized] = useState(false);
@@ -101,29 +114,56 @@ export default function FloatingTerminal({ view }: { view: View }) {
       onPointerDown={(e) => e.stopPropagation()}
     >
       <div
-        className="flex h-9 cursor-grab items-center justify-between gap-2 rounded-t-lg border-b border-white/10 bg-[#15151c] px-3 text-xs text-white/70 active:cursor-grabbing select-none"
+        className="flex h-9 cursor-grab items-center gap-2 rounded-t-lg border-b border-white/10 bg-[#15151c] px-3 text-xs text-white/70 active:cursor-grabbing select-none"
         onPointerDown={onHeaderPointerDown}
         onPointerMove={onHeaderPointerMove}
         onPointerUp={onHeaderPointerUp}
       >
-        <div className="flex items-center gap-2">
-          <span className="h-2.5 w-2.5 rounded-full bg-red-500/70" />
-          <span className="h-2.5 w-2.5 rounded-full bg-yellow-500/70" />
-          <span className="h-2.5 w-2.5 rounded-full bg-green-500/70" />
-          <span className="ml-2 font-mono">opencode</span>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={onStop}
+            className="group h-3 w-3 rounded-full bg-[#ff5f57] hover:brightness-110"
+            title="OpenCode を停止"
+          >
+            <X className="hidden h-3 w-3 stroke-[3] text-black/60 group-hover:block" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setMinimized((m) => !m)}
+            className="group h-3 w-3 rounded-full bg-[#febc2e] hover:brightness-110"
+            title={minimized ? "元に戻す" : "最小化"}
+          >
+            <Minus className="hidden h-3 w-3 stroke-[3] text-black/60 group-hover:block" />
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              onZoomToFit?.({
+                x: scenePos.x,
+                y: scenePos.y,
+                w: sceneSize.w,
+                h: sceneSize.h,
+              })
+            }
+            className="group h-3 w-3 rounded-full bg-[#28c840] hover:brightness-110"
+            title="80% フィット表示"
+          >
+            <Maximize2 className="hidden h-2.5 w-2.5 stroke-[3] text-black/60 group-hover:block" style={{ margin: '0.5px' }} />
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={() => setMinimized((m) => !m)}
-          className="rounded px-2 py-0.5 text-white/60 hover:bg-white/10 hover:text-white"
-        >
-          {minimized ? "▢" : "—"}
-        </button>
+        <span className="ml-1 font-mono">opencode</span>
       </div>
 
       {!minimized && (
         <div className="relative flex-1 overflow-hidden rounded-b-lg">
-          <XtermView />
+          {session ? (
+            <XtermView key={session.nonce} cwd={session.cwd} />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center bg-[#0b0b0f] px-6 text-center font-mono text-xs text-white/50">
+              Workspace でフォルダを選んで「OpenCode」ボタンを押してください
+            </div>
+          )}
           <div
             className="absolute right-0 bottom-0 h-4 w-4 cursor-nwse-resize"
             onPointerDown={onResizePointerDown}

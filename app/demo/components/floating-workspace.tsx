@@ -7,15 +7,27 @@ import {
   useState,
   type PointerEvent,
 } from "react";
+import {
+  FolderOpen,
+  RefreshCw,
+  Play,
+  Folder,
+  FileText,
+  ChevronRight,
+  ChevronDown,
+} from "lucide-react";
 import type { View } from "./whiteboard-canvas";
 
 type ScenePos = { x: number; y: number };
 type SceneSize = { w: number; h: number };
 
-type EntryHandle = {
+export type Workspace = { path: string; token: string };
+
+type Entry = {
   name: string;
-  kind: "file" | "directory";
-  handle: FileSystemFileHandle | FileSystemDirectoryHandle;
+  isDir: boolean;
+  size: number;
+  mtimeMs: number;
 };
 
 type FilePayload = {
@@ -25,50 +37,50 @@ type FilePayload = {
   content: string;
 };
 
-const MAX_BYTES = 512 * 1024;
-
 function join(base: string, name: string): string {
   return base.endsWith("/") ? `${base}${name}` : `${base}/${name}`;
 }
 
-function looksBinary(bytes: Uint8Array): boolean {
-  for (let i = 0; i < bytes.length; i++) {
-    if (bytes[i] === 0) return true;
+async function apiListDir(token: string, path: string): Promise<Entry[]> {
+  const res = await fetch(
+    `/api/workspace?token=${encodeURIComponent(token)}&path=${encodeURIComponent(path)}`,
+    { cache: "no-store" },
+  );
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? `HTTP ${res.status}`);
   }
-  return false;
+  const data = (await res.json()) as { entries: Entry[] };
+  return data.entries;
 }
 
-async function readEntries(
-  dir: FileSystemDirectoryHandle,
-): Promise<EntryHandle[]> {
-  const out: EntryHandle[] = [];
-  const iter = dir as unknown as AsyncIterable<
-    [string, FileSystemFileHandle | FileSystemDirectoryHandle]
-  >;
-  for await (const [name, handle] of iter) {
-    out.push({ name, kind: handle.kind, handle });
+async function apiReadFile(token: string, path: string): Promise<FilePayload> {
+  const res = await fetch(
+    `/api/workspace/file?token=${encodeURIComponent(token)}&path=${encodeURIComponent(path)}`,
+    { cache: "no-store" },
+  );
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? `HTTP ${res.status}`);
   }
-  out.sort((a, b) => {
-    if (a.kind !== b.kind) return a.kind === "directory" ? -1 : 1;
-    return a.name.localeCompare(b.name);
+  return (await res.json()) as FilePayload;
+}
+
+async function apiPickFolder(): Promise<Workspace | null> {
+  const res = await fetch("/api/pick-folder", {
+    method: "POST",
+    cache: "no-store",
   });
-  return out;
-}
-
-async function readFile(
-  handle: FileSystemFileHandle,
-  virtualPath: string,
-): Promise<FilePayload> {
-  const file = await handle.getFile();
-  const size = file.size;
-  const truncated = size > MAX_BYTES;
-  const slice = truncated ? file.slice(0, MAX_BYTES) : file;
-  const buf = new Uint8Array(await slice.arrayBuffer());
-  if (looksBinary(buf)) {
-    throw new Error("binary file not supported");
-  }
-  const content = new TextDecoder("utf-8", { fatal: false }).decode(buf);
-  return { path: virtualPath, size, truncated, content };
+  const data = (await res.json().catch(() => ({}))) as {
+    path?: string;
+    token?: string;
+    canceled?: boolean;
+    error?: string;
+  };
+  if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+  if (data.canceled) return null;
+  if (!data.path || !data.token) throw new Error("invalid response");
+  return { path: data.path, token: data.token };
 }
 
 function TreeRow({
@@ -83,17 +95,17 @@ function TreeRow({
   onSelectFile,
 }: {
   parentPath: string;
-  entry: EntryHandle;
+  entry: Entry;
   depth: number;
   expanded: Set<string>;
-  childEntries: Map<string, EntryHandle[]>;
+  childEntries: Map<string, Entry[]>;
   selectedFile: string | null;
   loadingPaths: Set<string>;
-  onToggleDir: (p: string, handle: FileSystemDirectoryHandle | null) => void;
-  onSelectFile: (p: string, handle: FileSystemFileHandle) => void;
+  onToggleDir: (p: string) => void;
+  onSelectFile: (p: string) => void;
 }) {
   const path = join(parentPath, entry.name);
-  const isDir = entry.kind === "directory";
+  const isDir = entry.isDir;
   const isOpen = expanded.has(path);
   const isLoading = loadingPaths.has(path);
   const children = childEntries.get(path);
@@ -102,13 +114,7 @@ function TreeRow({
     <div>
       <button
         type="button"
-        onClick={() => {
-          if (isDir) {
-            onToggleDir(path, entry.handle as FileSystemDirectoryHandle);
-          } else {
-            onSelectFile(path, entry.handle as FileSystemFileHandle);
-          }
-        }}
+        onClick={() => (isDir ? onToggleDir(path) : onSelectFile(path))}
         className={`flex w-full items-center gap-1 px-2 py-0.5 text-left font-mono text-xs transition-colors ${
           isSelected
             ? "bg-sky-100 text-sky-900"
@@ -118,9 +124,9 @@ function TreeRow({
         title={path}
       >
         <span className="w-3 shrink-0 text-slate-400">
-          {isDir ? (isOpen ? "▾" : "▸") : " "}
+          {isDir ? (isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />) : <span className="h-3 w-3" />}
         </span>
-        <span className="shrink-0">{isDir ? "📁" : "📄"}</span>
+        <span className="shrink-0 text-slate-500">{isDir ? <Folder className="h-3.5 w-3.5" /> : <FileText className="h-3.5 w-3.5" />}</span>
         <span className="truncate">{entry.name}</span>
         {isLoading && <span className="ml-auto text-slate-400">…</span>}
       </button>
@@ -154,21 +160,22 @@ function TreeRow({
   );
 }
 
-type WindowWithPicker = Window & {
-  showDirectoryPicker?: (opts?: {
-    mode?: "read" | "readwrite";
-  }) => Promise<FileSystemDirectoryHandle>;
-};
-
-export default function FloatingWorkspace({ view }: { view: View }) {
+export default function FloatingWorkspace({
+  view,
+  workspace,
+  onWorkspaceChange,
+  onStartOpenCode,
+}: {
+  view: View;
+  workspace: Workspace | null;
+  onWorkspaceChange: (ws: Workspace | null) => void;
+  onStartOpenCode: () => void;
+}) {
   const [scenePos, setScenePos] = useState<ScenePos>({ x: 60, y: 60 });
   const [sceneSize, setSceneSize] = useState<SceneSize>({ w: 640, h: 460 });
   const [splitPct, setSplitPct] = useState(45);
 
-  const [rootHandle, setRootHandle] =
-    useState<FileSystemDirectoryHandle | null>(null);
-  const [rootPath, setRootPath] = useState<string | null>(null);
-  const [childEntries, setChildEntries] = useState<Map<string, EntryHandle[]>>(
+  const [childEntries, setChildEntries] = useState<Map<string, Entry[]>>(
     new Map(),
   );
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -177,16 +184,13 @@ export default function FloatingWorkspace({ view }: { view: View }) {
   const [fileContent, setFileContent] = useState<FilePayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fileLoading, setFileLoading] = useState(false);
-  const [pickerSupported, setPickerSupported] = useState(true);
+  const [picking, setPicking] = useState(false);
 
   useEffect(() => {
     setScenePos({
       x: Math.max(0, (window.innerWidth - 640) / 2 - 420),
       y: Math.max(0, (window.innerHeight - 460) / 2),
     });
-    setPickerSupported(
-      typeof (window as WindowWithPicker).showDirectoryPicker === "function",
-    );
   }, []);
 
   const dragRef = useRef<{
@@ -283,86 +287,78 @@ export default function FloatingWorkspace({ view }: { view: View }) {
     splitRef.current = null;
   };
 
-  const loadDir = useCallback(
-    async (path: string, dirHandle: FileSystemDirectoryHandle) => {
-      setLoadingPaths((s) => {
-        const n = new Set(s);
-        n.add(path);
+  const loadDir = useCallback(async (token: string, path: string) => {
+    setLoadingPaths((s) => {
+      const n = new Set(s);
+      n.add(path);
+      return n;
+    });
+    try {
+      const entries = await apiListDir(token, path);
+      setChildEntries((m) => {
+        const n = new Map(m);
+        n.set(path, entries);
         return n;
       });
-      try {
-        const entries = await readEntries(dirHandle);
-        setChildEntries((m) => {
-          const n = new Map(m);
-          n.set(path, entries);
-          return n;
-        });
-        setError(null);
-      } catch (e) {
-        setError((e as Error).message);
-      } finally {
-        setLoadingPaths((s) => {
-          const n = new Set(s);
-          n.delete(path);
-          return n;
-        });
-      }
-    },
-    [],
-  );
-
-  const openPicker = useCallback(async () => {
-    const w = window as WindowWithPicker;
-    if (!w.showDirectoryPicker) {
-      setError(
-        "このブラウザはフォルダピッカー (File System Access API) に対応していません。Chrome / Edge / Arc をお試しください。",
-      );
-      return;
+      setError(null);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoadingPaths((s) => {
+        const n = new Set(s);
+        n.delete(path);
+        return n;
+      });
     }
+  }, []);
+
+  const pickFolder = useCallback(async () => {
+    setPicking(true);
+    setError(null);
     try {
-      const handle = await w.showDirectoryPicker({ mode: "read" });
-      const path = handle.name;
-      setRootHandle(handle);
-      setRootPath(path);
-      setExpanded(new Set([path]));
+      const ws = await apiPickFolder();
+      if (!ws) return;
+      onWorkspaceChange(ws);
+      setExpanded(new Set([ws.path]));
       setChildEntries(new Map());
       setSelectedFile(null);
       setFileContent(null);
-      setError(null);
-      await loadDir(path, handle);
+      await loadDir(ws.token, ws.path);
     } catch (e) {
-      const err = e as Error;
-      if (err.name === "AbortError") return;
-      setError(err.message);
+      setError((e as Error).message);
+    } finally {
+      setPicking(false);
     }
-  }, [loadDir]);
+  }, [loadDir, onWorkspaceChange]);
 
   const onToggleDir = useCallback(
-    (p: string, handle: FileSystemDirectoryHandle | null) => {
+    (p: string) => {
+      if (!workspace) return;
       setExpanded((s) => {
         const n = new Set(s);
         if (n.has(p)) {
           n.delete(p);
         } else {
           n.add(p);
-          if (!childEntries.has(p) && handle) {
-            void loadDir(p, handle);
+          if (!childEntries.has(p)) {
+            void loadDir(workspace.token, p);
           }
         }
         return n;
       });
     },
-    [childEntries, loadDir],
+    [childEntries, loadDir, workspace],
   );
 
   const onSelectFile = useCallback(
-    async (p: string, handle: FileSystemFileHandle) => {
+    async (p: string) => {
+      if (!workspace) return;
       setSelectedFile(p);
       setFileContent(null);
       setFileLoading(true);
       setError(null);
       try {
-        const data = await readFile(handle, p);
+        const data = await apiReadFile(workspace.token, p);
         setFileContent(data);
       } catch (e) {
         setError((e as Error).message);
@@ -370,54 +366,22 @@ export default function FloatingWorkspace({ view }: { view: View }) {
         setFileLoading(false);
       }
     },
-    [],
-  );
-
-  const refreshEntry = useCallback(
-    async (path: string) => {
-      if (path === rootPath && rootHandle) {
-        await loadDir(path, rootHandle);
-        return;
-      }
-      // walk from root
-      if (!rootHandle || !rootPath) return;
-      const parts = path.slice(rootPath.length).split("/").filter(Boolean);
-      let cur: FileSystemDirectoryHandle = rootHandle;
-      try {
-        for (const seg of parts) {
-          cur = await cur.getDirectoryHandle(seg);
-        }
-        await loadDir(path, cur);
-      } catch (e) {
-        setError((e as Error).message);
-      }
-    },
-    [loadDir, rootHandle, rootPath],
+    [workspace],
   );
 
   const onRefresh = useCallback(async () => {
+    if (!workspace) return;
     const paths = Array.from(expanded);
-    await Promise.all(paths.map((p) => refreshEntry(p)));
-    if (selectedFile && rootHandle && rootPath) {
-      const parts = selectedFile
-        .slice(rootPath.length)
-        .split("/")
-        .filter(Boolean);
-      const fileName = parts.pop();
-      if (!fileName) return;
-      let cur: FileSystemDirectoryHandle = rootHandle;
+    await Promise.all(paths.map((p) => loadDir(workspace.token, p)));
+    if (selectedFile) {
       try {
-        for (const seg of parts) {
-          cur = await cur.getDirectoryHandle(seg);
-        }
-        const fh = await cur.getFileHandle(fileName);
-        const data = await readFile(fh, selectedFile);
+        const data = await apiReadFile(workspace.token, selectedFile);
         setFileContent(data);
       } catch (e) {
         setError((e as Error).message);
       }
     }
-  }, [expanded, refreshEntry, rootHandle, rootPath, selectedFile]);
+  }, [expanded, loadDir, selectedFile, workspace]);
 
   const left = (scenePos.x + view.x) * view.zoom;
   const top = (scenePos.y + view.y) * view.zoom;
@@ -448,33 +412,43 @@ export default function FloatingWorkspace({ view }: { view: View }) {
           </span>
         </div>
         <span className="truncate font-mono text-[10px] text-slate-400">
-          {rootPath ?? "(no folder open)"}
+          {workspace?.path ?? "(no folder open)"}
         </span>
       </div>
 
-      <div className="flex items-center gap-2 border-b border-slate-200 bg-white px-3 py-1.5">
+      <div className="flex flex-nowrap items-center gap-1.5 border-b border-slate-200 bg-white px-2 py-1">
         <button
           type="button"
-          onClick={() => void openPicker()}
-          disabled={!pickerSupported}
-          className="rounded border border-sky-300 bg-sky-50 px-3 py-1 text-xs font-medium text-sky-700 hover:bg-sky-100 disabled:opacity-40"
+          onClick={() => void pickFolder()}
+          disabled={picking}
+          className="inline-flex shrink-0 items-center gap-1 rounded border border-sky-300 bg-sky-50 px-2 py-1 text-xs font-medium text-sky-700 hover:bg-sky-100 disabled:opacity-40"
         >
-          📂 フォルダを選択…
+          <FolderOpen className="h-3.5 w-3.5 shrink-0" />
+          <span className="truncate">{picking ? "選択中…" : "フォルダを選択…"}</span>
         </button>
         <button
           type="button"
           onClick={() => void onRefresh()}
-          disabled={!rootHandle}
-          className="rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-30"
+          disabled={!workspace}
+          className="inline-flex shrink-0 items-center rounded border border-slate-300 bg-white p-1 text-slate-700 hover:bg-slate-50 disabled:opacity-30"
           title="Refresh"
         >
-          🔄
+          <RefreshCw className="h-3.5 w-3.5" />
         </button>
-        <span className="ml-auto truncate font-mono text-[10px] text-slate-400">
-          {pickerSupported
-            ? "Finder でフォルダを選ぶと、その配下のみアクセスできます"
-            : "このブラウザは非対応"}
-        </span>
+        <button
+          type="button"
+          onClick={onStartOpenCode}
+          disabled={!workspace}
+          className="ml-auto inline-flex shrink-0 items-center gap-1 rounded border border-emerald-400 bg-emerald-500 px-2 py-1 text-xs font-semibold text-white shadow-sm hover:bg-emerald-600 disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
+          title={
+            workspace
+              ? `OpenCode を ${workspace.path} で起動`
+              : "先にフォルダを選択してください"
+          }
+        >
+          <Play className="h-3.5 w-3.5 shrink-0" />
+          OpenCode
+        </button>
       </div>
 
       {error && (
@@ -488,10 +462,9 @@ export default function FloatingWorkspace({ view }: { view: View }) {
           className="min-w-0 overflow-auto border-r border-slate-200 bg-slate-50/60 py-1"
           style={{ width: `${splitPct}%` }}
         >
-          {rootHandle && rootPath ? (
-            <TreeNodeRoot
-              rootPath={rootPath}
-              rootHandle={rootHandle}
+          {workspace ? (
+            <TreeRootRow
+              rootPath={workspace.path}
               expanded={expanded}
               childEntries={childEntries}
               selectedFile={selectedFile}
@@ -501,7 +474,7 @@ export default function FloatingWorkspace({ view }: { view: View }) {
             />
           ) : (
             <div className="px-3 py-2 font-mono text-xs text-slate-400">
-              「フォルダを選択…」から開始してください
+              「フォルダを選択…」を押すと Finder が開きます
             </div>
           )}
         </div>
@@ -553,9 +526,8 @@ export default function FloatingWorkspace({ view }: { view: View }) {
   );
 }
 
-function TreeNodeRoot({
+function TreeRootRow({
   rootPath,
-  rootHandle,
   expanded,
   childEntries,
   selectedFile,
@@ -564,30 +536,30 @@ function TreeNodeRoot({
   onSelectFile,
 }: {
   rootPath: string;
-  rootHandle: FileSystemDirectoryHandle;
   expanded: Set<string>;
-  childEntries: Map<string, EntryHandle[]>;
+  childEntries: Map<string, Entry[]>;
   selectedFile: string | null;
   loadingPaths: Set<string>;
-  onToggleDir: (p: string, handle: FileSystemDirectoryHandle | null) => void;
-  onSelectFile: (p: string, handle: FileSystemFileHandle) => void;
+  onToggleDir: (p: string) => void;
+  onSelectFile: (p: string) => void;
 }) {
   const isOpen = expanded.has(rootPath);
   const isLoading = loadingPaths.has(rootPath);
   const children = childEntries.get(rootPath);
+  const rootName = rootPath.split("/").filter(Boolean).pop() ?? rootPath;
   return (
     <div>
       <button
         type="button"
-        onClick={() => onToggleDir(rootPath, rootHandle)}
+        onClick={() => onToggleDir(rootPath)}
         className="flex w-full items-center gap-1 px-2 py-0.5 text-left font-mono text-xs text-slate-700 hover:bg-slate-100"
         title={rootPath}
       >
         <span className="w-3 shrink-0 text-slate-400">
-          {isOpen ? "▾" : "▸"}
+          {isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
         </span>
-        <span className="shrink-0">📁</span>
-        <span className="truncate font-medium">{rootHandle.name}</span>
+        <span className="shrink-0 text-slate-500"><Folder className="h-3.5 w-3.5" /></span>
+        <span className="truncate font-medium">{rootName}</span>
         {isLoading && <span className="ml-auto text-slate-400">…</span>}
       </button>
       {isOpen && children && (
