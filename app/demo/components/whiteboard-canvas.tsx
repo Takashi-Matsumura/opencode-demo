@@ -20,10 +20,12 @@ export default function WhiteboardCanvas({
   onView,
   zoomRef,
   drawOverMode = false,
+  showToolbar = false,
 }: {
   onView?: (v: View) => void;
   zoomRef?: MutableRefObject<CanvasActions | null>;
   drawOverMode?: boolean;
+  showToolbar?: boolean;
 }) {
   const [api, setApi] = useState<{
     updateScene: (opts: {
@@ -99,9 +101,19 @@ export default function WhiteboardCanvas({
       <style>{`
         .excalidraw .layer-ui__wrapper__footer-left,
         .excalidraw .layer-ui__wrapper__footer-right,
-        .excalidraw .welcome-screen-center {
+        .excalidraw .welcome-screen-center,
+        .excalidraw .main-menu-trigger,
+        .excalidraw .App-menu_bottom,
+        .excalidraw .layer-ui__library {
           display: none !important;
         }
+        ${!showToolbar ? `
+        .excalidraw .layer-ui__wrapper__top-left,
+        .excalidraw .layer-ui__wrapper__top-right,
+        .excalidraw .App-toolbar-container {
+          display: none !important;
+        }
+        ` : ""}
       `}</style>
       <Excalidraw
         gridModeEnabled={!drawOverMode}

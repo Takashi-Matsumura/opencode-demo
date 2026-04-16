@@ -9,10 +9,13 @@
 ```
 ブラウザ ─ / (Next.js, App Router)
             ├─ Excalidraw (全画面キャンバス、グリッド表示)
+            ├─ FloatingWorkspace (ファイルエクスプローラ、フォルダ選択)
             └─ FloatingTerminal (xterm.js, キャンバス座標系に固定)
+                  ├─ 表面: OpenCode (TUI)
+                  └─ 裏面: Shell (bash/zsh、開発サーバ起動等)
                        │ ws://localhost:4097
                        ▼
-            pty-server.ts (ws + node-pty)
+            pty-server.ts (ws + node-pty, セッション管理)
                        │ spawn
                        ▼
             opencode (TUI) ── OpenAI 互換 ──▶ llama-server (:8080)
@@ -22,6 +25,16 @@
 ```
 
 ターミナルはシーン座標にアンカーされているため、ホワイトボードをパン／ズームするとそれに追従して移動・拡大縮小します。
+
+## 主な機能
+
+- **フリップターミナル** — 表面は OpenCode、裏面はインタラクティブシェル。ヘッダ右端のアイコンで回転アニメーション切替。裏面シェルで `next dev -p 3001` 等のサーバを直接起動可能。
+- **プロセス安全停止** — ターミナルを閉じると、PTY配下のプロセスツリーを SIGTERM → SIGKILL で段階的に停止。`OPENCODE_SESSION_ID` 環境変数による孤児プロセス追跡。
+- **セッション再接続** — スクリーンロックやネットワーク切断でWebSocketが切れても、PTYセッションを5分間保持。復帰時に自動再接続し、切断中の出力もバッファから復元。
+- **起動時の孤児回収** — PTYサーバ起動時に前回クラッシュで残った孤児プロセスを自動検出・停止。
+- **ワークスペースエクスプローラ** — macOS ネイティブフォルダピッカー、ファイルツリー表示、ファイル内容プレビュー。
+- **描画ツール切替** — Excalidraw の描画ツールバーをフッターから ON/OFF。Draw Over モードでフローティングパネルの上に描画可能。
+- **ズーム制御** — フッターバーからズーム操作、リセット、80% フィット表示（緑丸クリック）。
 
 ## 必要なもの
 
@@ -56,10 +69,11 @@ npm install
 
 ## 操作
 
-- ホワイトボード: マウスホイール／トラックパッドピンチでズーム、スペース＋ドラッグまたは手のひらツールでパン。
-- ターミナルはウィンドウ中央に初期表示。ヘッダをドラッグで移動、右下コーナーでリサイズ、右上ボタンで最小化。
-- ホワイトボードをパン／ズームするとターミナルも同じ倍率・位置で追従する。
-- Excalidraw の上部メニュー・ライブラリー・ヘルプは非表示。左下のズーム／undo-redo のみ表示。
+- **ホワイトボード**: マウスホイール／トラックパッドピンチでズーム、スペース＋ドラッグまたは手のひらツールでパン。
+- **ワークスペース**: 「フォルダを選択...」でプロジェクトを開き、「OpenCode」ボタンでターミナル起動。緑丸クリックで80%フィット表示。
+- **ターミナル**: ヘッダをドラッグで移動、右下コーナーでリサイズ。赤丸で停止、黄丸で最小化、緑丸でフィット表示。
+- **表裏切替**: ヘッダ右端のアイコンで OpenCode ↔ Shell を回転切替。裏面シェルからサーバ起動等が可能。
+- **フッター**: ズーム操作、Reset、Draw Over（パネル上に描画）、Toolbar（Excalidraw 描画ツール表示）。
 
 ## 環境変数
 
@@ -86,15 +100,16 @@ npm install
 app/
   page.tsx                       / のエントリ (dynamic import で SSR 無効化)
   demo/
-    page.tsx                     /demo のエントリ (/ と同等)
     components/
       whiteboard-canvas.tsx      Excalidraw を全画面描画、scrollX/Y/zoom を通知
-      floating-terminal.tsx      シーン座標にアンカーしたウィンドウ
-      xterm-view.tsx             xterm.js のマウントと WebSocket 接続
+      floating-terminal.tsx      フリップ式ターミナル (表: OpenCode / 裏: Shell)
+      floating-workspace.tsx     ファイルエクスプローラ、フォルダ選択
+      xterm-view.tsx             xterm.js のマウントと WebSocket 接続 (自動再接続対応)
     lib/
       ws-protocol.ts             ブラウザ ↔ pty-server のメッセージ型
 server/
-  pty-server.ts                  ws + node-pty で opencode を spawn
+  pty-server.ts                  ws + node-pty セッション管理 (再接続・タイムアウト対応)
+  process-cleanup.ts             プロセスツリー停止、孤児回収、セッションファイル管理
 opencode.json                    llama.cpp プロバイダ設定
 ```
 

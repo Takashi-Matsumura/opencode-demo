@@ -15,6 +15,7 @@ import {
   FileText,
   ChevronRight,
   ChevronDown,
+  Maximize2,
 } from "lucide-react";
 import type { View } from "./whiteboard-canvas";
 
@@ -165,14 +166,23 @@ export default function FloatingWorkspace({
   workspace,
   onWorkspaceChange,
   onStartOpenCode,
+  onZoomToFit,
 }: {
   view: View;
   workspace: Workspace | null;
   onWorkspaceChange: (ws: Workspace | null) => void;
   onStartOpenCode: () => void;
+  onZoomToFit?: (rect: { x: number; y: number; w: number; h: number }) => void;
 }) {
   const [scenePos, setScenePos] = useState<ScenePos>({ x: 60, y: 60 });
   const [sceneSize, setSceneSize] = useState<SceneSize>({ w: 640, h: 460 });
+
+  useEffect(() => {
+    setScenePos({
+      x: Math.max(0, (window.innerWidth - 640) / 2),
+      y: Math.max(0, (window.innerHeight - 460) / 2),
+    });
+  }, []);
   const [splitPct, setSplitPct] = useState(45);
 
   const [childEntries, setChildEntries] = useState<Map<string, Entry[]>>(
@@ -188,7 +198,7 @@ export default function FloatingWorkspace({
 
   useEffect(() => {
     setScenePos({
-      x: Math.max(0, (window.innerWidth - 640) / 2 - 420),
+      x: Math.max(0, (window.innerWidth - 640) / 2),
       y: Math.max(0, (window.innerHeight - 460) / 2),
     });
   }, []);
@@ -406,7 +416,17 @@ export default function FloatingWorkspace({
         onPointerUp={onHeaderPointerUp}
       >
         <div className="flex items-center gap-2">
-          <span className="h-2.5 w-2.5 rounded-full bg-sky-500" />
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onZoomToFit?.({ x: scenePos.x, y: scenePos.y, w: sceneSize.w, h: sceneSize.h });
+            }}
+            className="group h-3 w-3 rounded-full bg-[#28c840] hover:brightness-110"
+            title="80% フィット表示"
+          >
+            <Maximize2 className="hidden h-2.5 w-2.5 stroke-[3] text-black/60 group-hover:block" style={{ margin: '0.5px' }} />
+          </button>
           <span className="font-mono font-medium text-slate-700">
             workspace
           </span>

@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { ZoomIn, ZoomOut, Maximize, Layers } from "lucide-react";
+import { ZoomIn, ZoomOut, Maximize, Layers, PenTool } from "lucide-react";
 import type { View, CanvasActions } from "./demo/components/whiteboard-canvas";
 import type { Workspace } from "./demo/components/floating-workspace";
 import type { TerminalSession } from "./demo/components/floating-terminal";
@@ -28,6 +28,7 @@ export default function Home() {
     null,
   );
   const [drawOver, setDrawOver] = useState(false);
+  const [showToolbar, setShowToolbar] = useState(false);
 
   const startOpenCode = () => {
     if (!workspace) return;
@@ -38,12 +39,13 @@ export default function Home() {
 
   return (
     <main className="fixed inset-0 overflow-hidden">
-      <WhiteboardCanvas onView={setView} zoomRef={canvasRef} drawOverMode={drawOver} />
+      <WhiteboardCanvas onView={setView} zoomRef={canvasRef} drawOverMode={drawOver} showToolbar={showToolbar} />
       <FloatingWorkspace
         view={view}
         workspace={workspace}
         onWorkspaceChange={setWorkspace}
         onStartOpenCode={startOpenCode}
+        onZoomToFit={(rect) => canvasRef.current?.zoomToRect(rect)}
       />
       {terminalSession && (
         <FloatingTerminal
@@ -104,6 +106,20 @@ export default function Home() {
         >
           <Layers className="h-3.5 w-3.5" />
           {drawOver ? "Draw Over ON" : "Draw Over"}
+        </button>
+        <span className="mx-1 h-4 w-px bg-slate-300" />
+        <button
+          type="button"
+          onClick={() => setShowToolbar((v) => !v)}
+          className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium ${
+            showToolbar
+              ? "bg-sky-500 text-white shadow-sm"
+              : "text-slate-600 hover:bg-slate-100"
+          }`}
+          title={showToolbar ? "描画ツールを非表示" : "描画ツールを表示"}
+        >
+          <PenTool className="h-3.5 w-3.5" />
+          {showToolbar ? "Toolbar ON" : "Toolbar"}
         </button>
       </footer>
     </main>
