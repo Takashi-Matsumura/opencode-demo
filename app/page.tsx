@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { ZoomIn, ZoomOut, Maximize } from "lucide-react";
+import { ZoomIn, ZoomOut, Maximize, Layers } from "lucide-react";
 import type { View, CanvasActions } from "./demo/components/whiteboard-canvas";
 import type { Workspace } from "./demo/components/floating-workspace";
 import type { TerminalSession } from "./demo/components/floating-terminal";
@@ -27,6 +27,7 @@ export default function Home() {
   const [terminalSession, setTerminalSession] = useState<TerminalSession | null>(
     null,
   );
+  const [drawOver, setDrawOver] = useState(false);
 
   const startOpenCode = () => {
     if (!workspace) return;
@@ -37,7 +38,7 @@ export default function Home() {
 
   return (
     <main className="fixed inset-0 overflow-hidden">
-      <WhiteboardCanvas onView={setView} zoomRef={canvasRef} />
+      <WhiteboardCanvas onView={setView} zoomRef={canvasRef} drawOverMode={drawOver} />
       <FloatingWorkspace
         view={view}
         workspace={workspace}
@@ -89,6 +90,20 @@ export default function Home() {
           title="Reset zoom"
         >
           <Maximize className="inline h-3.5 w-3.5" /> Reset
+        </button>
+        <span className="mx-1 h-4 w-px bg-slate-300" />
+        <button
+          type="button"
+          onClick={() => setDrawOver((d) => !d)}
+          className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium ${
+            drawOver
+              ? "bg-sky-500 text-white shadow-sm"
+              : "text-slate-600 hover:bg-slate-100"
+          }`}
+          title={drawOver ? "通常モードに戻す" : "パネルの上に描画"}
+        >
+          <Layers className="h-3.5 w-3.5" />
+          {drawOver ? "Draw Over ON" : "Draw Over"}
         </button>
       </footer>
     </main>

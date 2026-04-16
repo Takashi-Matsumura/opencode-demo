@@ -19,15 +19,26 @@ export type CanvasActions = {
 export default function WhiteboardCanvas({
   onView,
   zoomRef,
+  drawOverMode = false,
 }: {
   onView?: (v: View) => void;
   zoomRef?: MutableRefObject<CanvasActions | null>;
+  drawOverMode?: boolean;
 }) {
   const [api, setApi] = useState<{
     updateScene: (opts: {
-      appState: { scrollX: number; scrollY: number; zoom: { value: number } };
+      appState: Record<string, unknown>;
     }) => void;
   } | null>(null);
+
+  useEffect(() => {
+    if (!api) return;
+    api.updateScene({
+      appState: {
+        viewBackgroundColor: drawOverMode ? "transparent" : "#ffffff",
+      },
+    });
+  }, [api, drawOverMode]);
 
   useEffect(() => {
     if (!zoomRef || !api) return;
@@ -79,7 +90,7 @@ export default function WhiteboardCanvas({
 
   return (
     <div
-      style={{ position: "absolute", inset: 0 }}
+      style={{ position: "absolute", inset: 0, zIndex: drawOverMode ? 55 : undefined }}
       onPointerDown={() => {
         const active = document.activeElement;
         if (active instanceof HTMLElement) active.blur();
@@ -93,7 +104,7 @@ export default function WhiteboardCanvas({
         }
       `}</style>
       <Excalidraw
-        gridModeEnabled
+        gridModeEnabled={!drawOverMode}
         excalidrawAPI={(a) => setApi(a as typeof api)}
         onScrollChange={(scrollX, scrollY, zoom) =>
           onView?.({ x: scrollX, y: scrollY, zoom: zoom.value })
