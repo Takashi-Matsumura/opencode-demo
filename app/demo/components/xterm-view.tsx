@@ -30,6 +30,9 @@ export default function XtermView() {
     term.open(el);
     fit.fit();
 
+    const textarea = el.querySelector("textarea");
+    textarea?.blur();
+
     const ws = new WebSocket(PTY_WS_URL);
     ws.binaryType = "arraybuffer";
 

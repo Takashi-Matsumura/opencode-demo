@@ -2,41 +2,55 @@
 
 import { useEffect, useRef, useState, type PointerEvent } from "react";
 import dynamic from "next/dynamic";
+import type { View } from "./whiteboard-canvas";
 
 const XtermView = dynamic(() => import("./xterm-view"), { ssr: false });
 
-type Pos = { x: number; y: number };
-type Size = { w: number; h: number };
+type ScenePos = { x: number; y: number };
+type SceneSize = { w: number; h: number };
 
-export default function FloatingTerminal() {
-  const [pos, setPos] = useState<Pos>({ x: 80, y: 80 });
-  const [size, setSize] = useState<Size>({ w: 720, h: 440 });
+export default function FloatingTerminal({ view }: { view: View }) {
+  const [scenePos, setScenePos] = useState<ScenePos>({ x: 80, y: 80 });
+  const [sceneSize, setSceneSize] = useState<SceneSize>({ w: 720, h: 440 });
   const [minimized, setMinimized] = useState(false);
 
   useEffect(() => {
-    const margin = 24;
-    setPos({
-      x: Math.max(margin, window.innerWidth - 720 - margin),
-      y: Math.max(margin, window.innerHeight - 440 - margin),
+    setScenePos({
+      x: Math.max(0, (window.innerWidth - 720) / 2),
+      y: Math.max(0, (window.innerHeight - 440) / 2),
     });
   }, []);
 
-  const dragRef = useRef<{ dx: number; dy: number } | null>(null);
-  const resizeRef = useRef<{ sx: number; sy: number; sw: number; sh: number } | null>(
-    null,
-  );
+  const dragRef = useRef<{
+    sx: number;
+    sy: number;
+    px: number;
+    py: number;
+  } | null>(null);
+  const resizeRef = useRef<{
+    sx: number;
+    sy: number;
+    sw: number;
+    sh: number;
+  } | null>(null);
 
   const onHeaderPointerDown = (e: PointerEvent<HTMLDivElement>) => {
     if ((e.target as HTMLElement).closest("button")) return;
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    dragRef.current = { dx: e.clientX - pos.x, dy: e.clientY - pos.y };
+    dragRef.current = {
+      sx: e.clientX,
+      sy: e.clientY,
+      px: scenePos.x,
+      py: scenePos.y,
+    };
   };
 
   const onHeaderPointerMove = (e: PointerEvent<HTMLDivElement>) => {
     if (!dragRef.current) return;
-    setPos({
-      x: e.clientX - dragRef.current.dx,
-      y: e.clientY - dragRef.current.dy,
+    const d = dragRef.current;
+    setScenePos({
+      x: d.px + (e.clientX - d.sx) / view.zoom,
+      y: d.py + (e.clientY - d.sy) / view.zoom,
     });
   };
 
@@ -51,17 +65,17 @@ export default function FloatingTerminal() {
     resizeRef.current = {
       sx: e.clientX,
       sy: e.clientY,
-      sw: size.w,
-      sh: size.h,
+      sw: sceneSize.w,
+      sh: sceneSize.h,
     };
   };
 
   const onResizePointerMove = (e: PointerEvent<HTMLDivElement>) => {
     if (!resizeRef.current) return;
     const r = resizeRef.current;
-    setSize({
-      w: Math.max(320, r.sw + (e.clientX - r.sx)),
-      h: Math.max(180, r.sh + (e.clientY - r.sy)),
+    setSceneSize({
+      w: Math.max(320, r.sw + (e.clientX - r.sx) / view.zoom),
+      h: Math.max(180, r.sh + (e.clientY - r.sy) / view.zoom),
     });
   };
 
@@ -70,14 +84,19 @@ export default function FloatingTerminal() {
     resizeRef.current = null;
   };
 
+  const left = (scenePos.x + view.x) * view.zoom;
+  const top = (scenePos.y + view.y) * view.zoom;
+
   return (
     <div
       className="fixed z-50 flex flex-col rounded-lg border border-white/10 bg-[#0b0b0f] shadow-2xl shadow-black/50 backdrop-blur"
       style={{
-        left: pos.x,
-        top: pos.y,
-        width: size.w,
-        height: minimized ? 36 : size.h,
+        left: 0,
+        top: 0,
+        width: sceneSize.w,
+        height: minimized ? 36 : sceneSize.h,
+        transform: `translate(${left}px, ${top}px) scale(${view.zoom})`,
+        transformOrigin: "top left",
       }}
       onPointerDown={(e) => e.stopPropagation()}
     >

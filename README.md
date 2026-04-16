@@ -7,9 +7,9 @@
 ## 構成
 
 ```
-ブラウザ ─ /demo (Next.js, App Router)
-            ├─ Excalidraw (全画面キャンバス)
-            └─ FloatingTerminal (xterm.js)
+ブラウザ ─ / (Next.js, App Router)
+            ├─ Excalidraw (全画面キャンバス、グリッド表示)
+            └─ FloatingTerminal (xterm.js, キャンバス座標系に固定)
                        │ ws://localhost:4097
                        ▼
             pty-server.ts (ws + node-pty)
@@ -20,6 +20,8 @@
                                                     ▼
                                                   Gemma
 ```
+
+ターミナルはシーン座標にアンカーされているため、ホワイトボードをパン／ズームするとそれに追従して移動・拡大縮小します。
 
 ## 必要なもの
 
@@ -50,7 +52,14 @@ npm install
    PTY_CMD=$(which opencode) npm run dev:all
    ```
 
-3. ブラウザで http://localhost:3000/demo を開く。
+3. ブラウザで http://localhost:3000 を開く。
+
+## 操作
+
+- ホワイトボード: マウスホイール／トラックパッドピンチでズーム、スペース＋ドラッグまたは手のひらツールでパン。
+- ターミナルはウィンドウ中央に初期表示。ヘッダをドラッグで移動、右下コーナーでリサイズ、右上ボタンで最小化。
+- ホワイトボードをパン／ズームするとターミナルも同じ倍率・位置で追従する。
+- Excalidraw の上部メニュー・ライブラリー・ヘルプは非表示。左下のズーム／undo-redo のみ表示。
 
 ## 環境変数
 
@@ -74,14 +83,16 @@ npm install
 ## ファイル構成
 
 ```
-app/demo/
-  page.tsx                       /demo のエントリ (dynamic import で SSR 無効化)
-  components/
-    whiteboard-canvas.tsx        Excalidraw を全画面に描画
-    floating-terminal.tsx        ドラッグ移動・リサイズ可能なウィンドウ
-    xterm-view.tsx               xterm.js のマウントと WebSocket 接続
-  lib/
-    ws-protocol.ts               ブラウザ ↔ pty-server のメッセージ型
+app/
+  page.tsx                       / のエントリ (dynamic import で SSR 無効化)
+  demo/
+    page.tsx                     /demo のエントリ (/ と同等)
+    components/
+      whiteboard-canvas.tsx      Excalidraw を全画面描画、scrollX/Y/zoom を通知
+      floating-terminal.tsx      シーン座標にアンカーしたウィンドウ
+      xterm-view.tsx             xterm.js のマウントと WebSocket 接続
+    lib/
+      ws-protocol.ts             ブラウザ ↔ pty-server のメッセージ型
 server/
   pty-server.ts                  ws + node-pty で opencode を spawn
 opencode.json                    llama.cpp プロバイダ設定
@@ -89,6 +100,7 @@ opencode.json                    llama.cpp プロバイダ設定
 
 ## 既知の注意点
 
+- **`reactStrictMode: false` 必須**。Next.js 16 + React 19 + `@excalidraw/excalidraw@0.18` の組み合わせでは Strict Mode 有効時に Excalidraw のデスクトップ UI（`.layer-ui__wrapper`）が描画されないため、`next.config.ts` で無効化している。
 - **node-pty は `@homebridge/node-pty-prebuilt-multiarch` を使用**。本家 `node-pty@1.1.0` は Node.js v25 で `posix_spawnp failed` エラーが出るため。
 - **`PTY_CMD` はフルパス指定が安全**。`tsx` 経由で起動した子プロセスの PATH 解決に依存しないため。
 - **Vercel 等の serverless にはそのままデプロイ不可**。pty-server が常駐 Node.js プロセスを必要とするため、Docker / Railway / Render などへの自前デプロイが必要です。
