@@ -16,6 +16,7 @@ import {
   ChevronRight,
   ChevronDown,
   Maximize2,
+  ShieldCheck,
 } from "lucide-react";
 import type { View } from "./whiteboard-canvas";
 
@@ -166,12 +167,14 @@ export default function FloatingWorkspace({
   workspace,
   onWorkspaceChange,
   onStartOpenCode,
+  onStartBusinessOpenCode,
   onZoomToFit,
 }: {
   view: View;
   workspace: Workspace | null;
   onWorkspaceChange: (ws: Workspace | null) => void;
   onStartOpenCode: () => void;
+  onStartBusinessOpenCode: () => void;
   onZoomToFit?: (rect: { x: number; y: number; w: number; h: number }) => void;
 }) {
   const [scenePos, setScenePos] = useState<ScenePos>({ x: 60, y: 60 });
@@ -455,20 +458,36 @@ export default function FloatingWorkspace({
         >
           <RefreshCw className="h-3.5 w-3.5" />
         </button>
-        <button
-          type="button"
-          onClick={onStartOpenCode}
-          disabled={!workspace}
-          className="ml-auto inline-flex shrink-0 items-center gap-1 rounded border border-emerald-400 bg-emerald-500 px-2 py-1 text-xs font-semibold text-white shadow-sm hover:bg-emerald-600 disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
-          title={
-            workspace
-              ? `OpenCode を ${workspace.path} で起動`
-              : "先にフォルダを選択してください"
-          }
-        >
-          <Play className="h-3.5 w-3.5 shrink-0" />
-          OpenCode
-        </button>
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
+          <button
+            type="button"
+            onClick={onStartOpenCode}
+            disabled={!workspace}
+            className="inline-flex shrink-0 items-center gap-1 rounded border border-[#15151c] bg-[#15151c] px-2 py-1 text-xs font-semibold text-white shadow-sm hover:bg-[#2a2a35] disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
+            title={
+              workspace
+                ? `Coding を ${workspace.path} で起動`
+                : "先にフォルダを選択してください"
+            }
+          >
+            <Play className="h-3.5 w-3.5 shrink-0" />
+            Coding
+          </button>
+          <button
+            type="button"
+            onClick={onStartBusinessOpenCode}
+            disabled={!workspace}
+            className="inline-flex shrink-0 items-center gap-1 rounded border border-[#217346] bg-[#217346] px-2 py-1 text-xs font-semibold text-white shadow-sm hover:bg-[#1a5c38] disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
+            title={
+              workspace
+                ? `Business を ${workspace.path} で起動`
+                : "先にフォルダを選択してください"
+            }
+          >
+            <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
+            Business
+          </button>
+        </div>
       </div>
 
       {error && (

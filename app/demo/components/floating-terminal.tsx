@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type PointerEvent } from "react";
 import dynamic from "next/dynamic";
-import { X, Minus, Maximize2, ArrowUpDown } from "lucide-react";
+import { X, Minus, Maximize2, ArrowUpDown, Plus } from "lucide-react";
 import type { View, SceneRect } from "./whiteboard-canvas";
 import OpenCodeSettings from "./opencode-settings";
 
@@ -12,6 +12,7 @@ type ScenePos = { x: number; y: number };
 type SceneSize = { w: number; h: number };
 
 export type TerminalSession = { cwd: string; nonce: number };
+export type TerminalVariant = "coding" | "business";
 
 export default function FloatingTerminal({
   view,
@@ -20,6 +21,9 @@ export default function FloatingTerminal({
   onZoomToFit,
   workspaceCwd,
   workspaceToken,
+  variant = "coding",
+  label = "opencode",
+  slot = "left",
 }: {
   view: View;
   session: TerminalSession | null;
@@ -27,19 +31,40 @@ export default function FloatingTerminal({
   onZoomToFit?: (rect: SceneRect) => void;
   workspaceCwd?: string;
   workspaceToken?: string;
+  variant?: TerminalVariant;
+  label?: string;
+  slot?: "left" | "right";
 }) {
   const [scenePos, setScenePos] = useState<ScenePos>({ x: 80, y: 80 });
   const [sceneSize, setSceneSize] = useState<SceneSize>({ w: 720, h: 440 });
   const [minimized, setMinimized] = useState(false);
   const [flipped, setFlipped] = useState(false);
   const [backNonce, setBackNonce] = useState(0);
+  const [fontSize, setFontSize] = useState(() => {
+    if (typeof window === "undefined") return 13;
+    const saved = localStorage.getItem(`terminal-fontSize-${variant}`);
+    return saved ? Number(saved) : 13;
+  });
+  const [fontNonce, setFontNonce] = useState(0);
+
+  const changeFontSize = (delta: number) => {
+    setFontSize((prev) => {
+      const next = Math.min(28, Math.max(10, prev + delta));
+      localStorage.setItem(`terminal-fontSize-${variant}`, String(next));
+      setFontNonce(Date.now());
+      return next;
+    });
+  };
 
   useEffect(() => {
+    const cx = slot === "right"
+      ? window.innerWidth * 0.55
+      : window.innerWidth * 0.25 - 360;
     setScenePos({
-      x: Math.max(0, (window.innerWidth - 720) / 2),
+      x: Math.max(0, cx),
       y: Math.max(0, (window.innerHeight - 440) / 2),
     });
-  }, []);
+  }, [slot]);
 
   const dragRef = useRef<{
     sx: number;
@@ -114,9 +139,15 @@ export default function FloatingTerminal({
   const left = (scenePos.x + view.x) * view.zoom;
   const top = (scenePos.y + view.y) * view.zoom;
 
+  const isBusiness = variant === "business";
+
   const headerBar = (title: string) => (
     <div
-      className="flex h-9 cursor-grab items-center gap-2 rounded-t-lg border-b border-white/10 bg-[#15151c] px-3 text-xs text-white/70 active:cursor-grabbing select-none"
+      className={`flex h-9 cursor-grab items-center gap-2 rounded-t-lg border-b px-3 text-xs active:cursor-grabbing select-none ${
+        isBusiness
+          ? "border-[#b7d9b7] bg-[#217346] text-white"
+          : "border-white/10 bg-[#15151c] text-white/70 border-t-2 border-t-emerald-500"
+      }`}
       onPointerDown={onHeaderPointerDown}
       onPointerMove={onHeaderPointerMove}
       onPointerUp={onHeaderPointerUp}
@@ -158,13 +189,14 @@ export default function FloatingTerminal({
       <button
         type="button"
         onClick={handleFlip}
-        className="rounded p-0.5 text-white/50 hover:bg-white/10 hover:text-white/80"
+        className={`rounded p-0.5 ${isBusiness ? "text-white/70 hover:bg-white/20 hover:text-white" : "text-white/50 hover:bg-white/10 hover:text-white/80"}`}
         title={flipped ? "OpenCode に戻す" : "設定・シェルを開く"}
       >
         <ArrowUpDown className="h-3.5 w-3.5 rotate-90" />
       </button>
     </div>
   );
+
 
   return (
     <div
@@ -192,21 +224,31 @@ export default function FloatingTerminal({
       >
         {/* Front: OpenCode */}
         <div
-          className="flex flex-col rounded-lg border border-white/10 bg-[#0b0b0f] shadow-2xl shadow-black/50 backdrop-blur"
+          className={`flex flex-col rounded-lg shadow-2xl backdrop-blur ${
+            isBusiness
+              ? "border border-[#b7d9b7] shadow-green-900/20"
+              : "border border-white/10 shadow-black/50"
+          }`}
           style={{
             position: "absolute",
             inset: 0,
             backfaceVisibility: "hidden",
+            backgroundColor: isBusiness ? "#eaf5ea" : "#0b0b0f",
           }}
         >
-          {headerBar("opencode")}
+          {headerBar(label)}
           {!minimized && (
-            <div className="relative flex-1 overflow-hidden rounded-b-lg">
+            <div
+              className="relative flex-1 overflow-hidden rounded-b-lg bg-[#0b0b0f]"
+              style={isBusiness ? {
+                filter: "invert(0.93) sepia(0.2) hue-rotate(75deg) saturate(1.8) contrast(1.15) brightness(1.02)",
+              } : undefined}
+            >
               {session ? (
-                <XtermView key={session.nonce} cwd={session.cwd} />
+                <XtermView key={`${session.nonce}-${fontNonce}`} cwd={session.cwd} fontSize={fontSize} />
               ) : (
                 <div className="flex h-full w-full items-center justify-center bg-[#0b0b0f] px-6 text-center font-mono text-xs text-white/50">
-                  Workspace でフォルダを選んで「OpenCode」ボタンを押してください
+                  Workspace でフォルダを選んで「{isBusiness ? "Business" : "Coding"}」ボタンを押してください
                 </div>
               )}
               <div
@@ -215,8 +257,7 @@ export default function FloatingTerminal({
                 onPointerMove={onResizePointerMove}
                 onPointerUp={onResizePointerUp}
                 style={{
-                  background:
-                    "linear-gradient(135deg, transparent 50%, rgba(255,255,255,0.25) 50%)",
+                  background: "linear-gradient(135deg, transparent 50%, rgba(255,255,255,0.25) 50%)",
                 }}
               />
             </div>
@@ -225,19 +266,50 @@ export default function FloatingTerminal({
 
         {/* Back: Shell / Settings */}
         <div
-          className="flex flex-col rounded-lg border border-white/10 bg-[#0b0b0f] shadow-2xl shadow-black/50 backdrop-blur"
+          className={`flex flex-col rounded-lg shadow-2xl backdrop-blur ${
+            isBusiness
+              ? "border border-[#b7d9b7] shadow-green-900/20"
+              : "border border-white/10 shadow-black/50"
+          }`}
           style={{
             position: "absolute",
             inset: 0,
             backfaceVisibility: "hidden",
             transform: "rotateY(180deg)",
+            backgroundColor: isBusiness ? "#eaf5ea" : "#0b0b0f",
           }}
         >
-          {headerBar("settings / shell")}
+          {headerBar(`${label} — settings / shell`)}
           {!minimized && (
-            <div className="relative flex flex-1 overflow-hidden rounded-b-lg">
+            <div
+              className="relative flex flex-1 overflow-hidden rounded-b-lg bg-[#0b0b0f]"
+              style={isBusiness ? {
+                filter: "invert(0.93) sepia(0.2) hue-rotate(75deg) saturate(1.8) contrast(1.15) brightness(1.02)",
+              } : undefined}
+            >
               {/* Left: Settings */}
               <div className="w-1/2 overflow-y-auto border-r border-white/10">
+                {/* Font Size */}
+                <div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
+                  <span className="font-mono text-[11px] text-white/70">Font Size</span>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => changeFontSize(-1)}
+                      className="flex h-5 w-5 items-center justify-center rounded bg-white/10 text-white/70 hover:bg-white/20"
+                    >
+                      <Minus className="h-3 w-3" />
+                    </button>
+                    <span className="min-w-[2rem] text-center font-mono text-xs text-white">{fontSize}px</span>
+                    <button
+                      type="button"
+                      onClick={() => changeFontSize(1)}
+                      className="flex h-5 w-5 items-center justify-center rounded bg-white/10 text-white/70 hover:bg-white/20"
+                    >
+                      <Plus className="h-3 w-3" />
+                    </button>
+                  </div>
+                </div>
                 {workspaceCwd && workspaceToken ? (
                   <OpenCodeSettings cwd={workspaceCwd} token={workspaceToken} />
                 ) : (
@@ -249,7 +321,7 @@ export default function FloatingTerminal({
               {/* Right: Shell */}
               <div className="relative w-1/2">
                 {backNonce > 0 && session ? (
-                  <XtermView key={backNonce} cwd={session.cwd} cmd="shell" />
+                  <XtermView key={`${backNonce}-${fontNonce}`} cwd={session.cwd} cmd="shell" fontSize={fontSize} />
                 ) : (
                   <div className="flex h-full w-full items-center justify-center bg-[#0b0b0f] px-6 text-center font-mono text-xs text-white/50">
                     OpenCode を起動すると、シェルが使えます
@@ -262,8 +334,7 @@ export default function FloatingTerminal({
                 onPointerMove={onResizePointerMove}
                 onPointerUp={onResizePointerUp}
                 style={{
-                  background:
-                    "linear-gradient(135deg, transparent 50%, rgba(255,255,255,0.25) 50%)",
+                  background: "linear-gradient(135deg, transparent 50%, rgba(255,255,255,0.25) 50%)",
                 }}
               />
             </div>

@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { ZoomIn, ZoomOut, Maximize, Layers, PenTool } from "lucide-react";
+import { ZoomIn, ZoomOut, Layers, PenTool } from "lucide-react";
 import type { View, CanvasActions } from "./demo/components/whiteboard-canvas";
 import type { Workspace } from "./demo/components/floating-workspace";
 import type { TerminalSession } from "./demo/components/floating-terminal";
@@ -24,18 +24,22 @@ export default function Home() {
   const canvasRef = useRef<CanvasActions | null>(null);
   const [view, setView] = useState<View>({ x: 0, y: 0, zoom: 1 });
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
-  const [terminalSession, setTerminalSession] = useState<TerminalSession | null>(
-    null,
-  );
+  const [codingSession, setCodingSession] = useState<TerminalSession | null>(null);
+  const [businessSession, setBusinessSession] = useState<TerminalSession | null>(null);
   const [drawOver, setDrawOver] = useState(false);
   const [showToolbar, setShowToolbar] = useState(false);
 
-  const startOpenCode = () => {
+  const startCodingOpenCode = () => {
     if (!workspace) return;
-    setTerminalSession({ cwd: workspace.path, nonce: Date.now() });
+    setCodingSession({ cwd: workspace.path, nonce: Date.now() });
+  };
+  const startBusinessOpenCode = () => {
+    if (!workspace) return;
+    setBusinessSession({ cwd: workspace.path, nonce: Date.now() });
   };
 
-  const stopOpenCode = () => setTerminalSession(null);
+  const stopCodingOpenCode = () => setCodingSession(null);
+  const stopBusinessOpenCode = () => setBusinessSession(null);
 
   return (
     <main className="fixed inset-0 overflow-hidden">
@@ -44,17 +48,34 @@ export default function Home() {
         view={view}
         workspace={workspace}
         onWorkspaceChange={setWorkspace}
-        onStartOpenCode={startOpenCode}
+        onStartOpenCode={startCodingOpenCode}
+        onStartBusinessOpenCode={startBusinessOpenCode}
         onZoomToFit={(rect) => canvasRef.current?.zoomToRect(rect)}
       />
-      {terminalSession && (
+      {codingSession && (
         <FloatingTerminal
           view={view}
-          session={terminalSession}
-          onStop={stopOpenCode}
+          session={codingSession}
+          onStop={stopCodingOpenCode}
           onZoomToFit={(rect) => canvasRef.current?.zoomToRect(rect)}
           workspaceCwd={workspace?.path}
           workspaceToken={workspace?.token}
+          variant="coding"
+          label="opencode — coding"
+          slot="left"
+        />
+      )}
+      {businessSession && (
+        <FloatingTerminal
+          view={view}
+          session={businessSession}
+          onStop={stopBusinessOpenCode}
+          onZoomToFit={(rect) => canvasRef.current?.zoomToRect(rect)}
+          workspaceCwd={workspace?.path}
+          workspaceToken={workspace?.token}
+          variant="business"
+          label="opencode — business"
+          slot="right"
         />
       )}
       <footer className="fixed right-0 bottom-0 left-0 z-[60] flex h-8 items-center justify-center gap-1 border-t border-slate-200 bg-white/90 backdrop-blur-sm">
@@ -85,15 +106,6 @@ export default function Home() {
           title="Zoom in"
         >
           <ZoomIn className="h-4 w-4" />
-        </button>
-        <span className="mx-1 h-4 w-px bg-slate-300" />
-        <button
-          type="button"
-          onClick={() => canvasRef.current?.resetZoom()}
-          className="rounded px-2 py-0.5 text-xs text-slate-600 hover:bg-slate-100"
-          title="Reset zoom"
-        >
-          <Maximize className="inline h-3.5 w-3.5" /> Reset
         </button>
         <span className="mx-1 h-4 w-px bg-slate-300" />
         <button

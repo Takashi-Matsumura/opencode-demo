@@ -9,7 +9,7 @@ import { PTY_WS_URL, type ClientMessage, type ServerMessage } from "../lib/ws-pr
 const MAX_RETRIES = 5;
 const RETRY_INTERVAL_MS = 2000;
 
-export default function XtermView({ cwd, cmd }: { cwd?: string | null; cmd?: string | null }) {
+export default function XtermView({ cwd, cmd, fontSize = 13 }: { cwd?: string | null; cmd?: string | null; fontSize?: number }) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -19,7 +19,7 @@ export default function XtermView({ cwd, cmd }: { cwd?: string | null; cmd?: str
     const term = new Terminal({
       fontFamily:
         '"Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace',
-      fontSize: 13,
+      fontSize,
       cursorBlink: true,
       theme: {
         background: "#0b0b0f",
@@ -118,7 +118,7 @@ export default function XtermView({ cwd, cmd }: { cwd?: string | null; cmd?: str
       ws?.close();
       term.dispose();
     };
-  }, [cwd, cmd]);
+  }, [cwd, cmd, fontSize]);
 
   return (
     <div
