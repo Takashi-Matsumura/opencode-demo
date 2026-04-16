@@ -86,7 +86,6 @@ export default function WhiteboardCanvas({
       }}
     >
       <style>{`
-        .excalidraw .App-menu_top,
         .excalidraw .layer-ui__wrapper__footer-left,
         .excalidraw .layer-ui__wrapper__footer-right,
         .excalidraw .welcome-screen-center {
