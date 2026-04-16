@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type PointerEvent } from "react";
 import dynamic from "next/dynamic";
 import { X, Minus, Maximize2, ArrowUpDown } from "lucide-react";
 import type { View, SceneRect } from "./whiteboard-canvas";
+import OpenCodeSettings from "./opencode-settings";
 
 const XtermView = dynamic(() => import("./xterm-view"), { ssr: false });
 
@@ -17,11 +18,15 @@ export default function FloatingTerminal({
   session,
   onStop,
   onZoomToFit,
+  workspaceCwd,
+  workspaceToken,
 }: {
   view: View;
   session: TerminalSession | null;
   onStop: () => void;
   onZoomToFit?: (rect: SceneRect) => void;
+  workspaceCwd?: string;
+  workspaceToken?: string;
 }) {
   const [scenePos, setScenePos] = useState<ScenePos>({ x: 80, y: 80 });
   const [sceneSize, setSceneSize] = useState<SceneSize>({ w: 720, h: 440 });
@@ -228,16 +233,29 @@ export default function FloatingTerminal({
             transform: "rotateY(180deg)",
           }}
         >
-          {headerBar("shell")}
+          {headerBar("settings / shell")}
           {!minimized && (
-            <div className="relative flex-1 overflow-hidden rounded-b-lg">
-              {backNonce > 0 && session ? (
-                <XtermView key={backNonce} cwd={session.cwd} cmd="shell" />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center bg-[#0b0b0f] px-6 text-center font-mono text-xs text-white/50">
-                  OpenCode を起動すると、シェルが使えます
-                </div>
-              )}
+            <div className="relative flex flex-1 overflow-hidden rounded-b-lg">
+              {/* Left: Settings */}
+              <div className="w-1/2 overflow-y-auto border-r border-white/10">
+                {workspaceCwd && workspaceToken ? (
+                  <OpenCodeSettings cwd={workspaceCwd} token={workspaceToken} />
+                ) : (
+                  <div className="flex h-full items-center justify-center px-4 text-center font-mono text-xs text-white/50">
+                    Workspace でフォルダを開くと設定が表示されます
+                  </div>
+                )}
+              </div>
+              {/* Right: Shell */}
+              <div className="relative w-1/2">
+                {backNonce > 0 && session ? (
+                  <XtermView key={backNonce} cwd={session.cwd} cmd="shell" />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center bg-[#0b0b0f] px-6 text-center font-mono text-xs text-white/50">
+                    OpenCode を起動すると、シェルが使えます
+                  </div>
+                )}
+              </div>
               <div
                 className="absolute right-0 bottom-0 h-4 w-4 cursor-nwse-resize"
                 onPointerDown={onResizePointerDown}

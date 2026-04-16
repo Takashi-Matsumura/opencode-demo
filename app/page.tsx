@@ -53,6 +53,8 @@ export default function Home() {
           session={terminalSession}
           onStop={stopOpenCode}
           onZoomToFit={(rect) => canvasRef.current?.zoomToRect(rect)}
+          workspaceCwd={workspace?.path}
+          workspaceToken={workspace?.token}
         />
       )}
       <footer className="fixed right-0 bottom-0 left-0 z-[60] flex h-8 items-center justify-center gap-1 border-t border-slate-200 bg-white/90 backdrop-blur-sm">
