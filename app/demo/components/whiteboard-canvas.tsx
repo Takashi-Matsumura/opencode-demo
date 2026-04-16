@@ -10,12 +10,18 @@ export type SceneRect = { x: number; y: number; w: number; h: number };
 
 export type ZoomToRectFn = (rect: SceneRect) => void;
 
+export type CanvasActions = {
+  zoomToRect: ZoomToRectFn;
+  resetZoom: () => void;
+  setZoom: (newZoom: number, currentView: View) => void;
+};
+
 export default function WhiteboardCanvas({
   onView,
   zoomRef,
 }: {
   onView?: (v: View) => void;
-  zoomRef?: MutableRefObject<ZoomToRectFn | null>;
+  zoomRef?: MutableRefObject<CanvasActions | null>;
 }) {
   const [api, setApi] = useState<{
     updateScene: (opts: {
@@ -25,19 +31,46 @@ export default function WhiteboardCanvas({
 
   useEffect(() => {
     if (!zoomRef || !api) return;
-    zoomRef.current = (rect) => {
-      const vw = window.innerWidth;
-      const vh = window.innerHeight;
-      const zoom = Math.min((vw * 0.8) / rect.w, (vh * 0.8) / rect.h);
-      const cx = rect.x + rect.w / 2;
-      const cy = rect.y + rect.h / 2;
-      api.updateScene({
-        appState: {
-          scrollX: vw / (2 * zoom) - cx,
-          scrollY: vh / (2 * zoom) - cy,
-          zoom: { value: zoom },
-        },
-      });
+    zoomRef.current = {
+      zoomToRect(rect) {
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        const zoom = Math.min((vw * 0.8) / rect.w, (vh * 0.8) / rect.h);
+        const cx = rect.x + rect.w / 2;
+        const cy = rect.y + rect.h / 2;
+        api.updateScene({
+          appState: {
+            scrollX: vw / (2 * zoom) - cx,
+            scrollY: vh / (2 * zoom) - cy,
+            zoom: { value: zoom },
+          },
+        });
+      },
+      resetZoom() {
+        api.updateScene({
+          appState: {
+            scrollX: 0,
+            scrollY: 0,
+            zoom: { value: 1 },
+          },
+        });
+      },
+      setZoom(newZoom, currentView) {
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        const oldZoom = currentView.zoom;
+        const newScrollX =
+          vw / (2 * newZoom) - vw / (2 * oldZoom) + currentView.x;
+        const newScrollY =
+          vh / (2 * newZoom) - vh / (2 * oldZoom) + currentView.y;
+        api.updateScene({
+          appState: {
+            scrollX: newScrollX,
+            scrollY: newScrollY,
+            zoom: { value: newZoom },
+          },
+        });
+      },
     };
     return () => {
       zoomRef.current = null;
@@ -54,6 +87,7 @@ export default function WhiteboardCanvas({
     >
       <style>{`
         .excalidraw .App-menu_top,
+        .excalidraw .layer-ui__wrapper__footer-left,
         .excalidraw .layer-ui__wrapper__footer-right,
         .excalidraw .welcome-screen-center {
           display: none !important;

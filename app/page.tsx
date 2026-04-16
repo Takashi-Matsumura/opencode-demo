@@ -2,7 +2,8 @@
 
 import { useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import type { View, ZoomToRectFn } from "./demo/components/whiteboard-canvas";
+import { ZoomIn, ZoomOut, Maximize } from "lucide-react";
+import type { View, CanvasActions } from "./demo/components/whiteboard-canvas";
 import type { Workspace } from "./demo/components/floating-workspace";
 import type { TerminalSession } from "./demo/components/floating-terminal";
 
@@ -20,7 +21,7 @@ const FloatingWorkspace = dynamic(
 );
 
 export default function Home() {
-  const zoomRef = useRef<ZoomToRectFn | null>(null);
+  const canvasRef = useRef<CanvasActions | null>(null);
   const [view, setView] = useState<View>({ x: 0, y: 0, zoom: 1 });
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [terminalSession, setTerminalSession] = useState<TerminalSession | null>(
@@ -36,7 +37,7 @@ export default function Home() {
 
   return (
     <main className="fixed inset-0 overflow-hidden">
-      <WhiteboardCanvas onView={setView} zoomRef={zoomRef} />
+      <WhiteboardCanvas onView={setView} zoomRef={canvasRef} />
       <FloatingWorkspace
         view={view}
         workspace={workspace}
@@ -48,9 +49,48 @@ export default function Home() {
           view={view}
           session={terminalSession}
           onStop={stopOpenCode}
-          onZoomToFit={(rect) => zoomRef.current?.(rect)}
+          onZoomToFit={(rect) => canvasRef.current?.zoomToRect(rect)}
         />
       )}
+      <footer className="fixed right-0 bottom-0 left-0 z-[60] flex h-8 items-center justify-center gap-1 border-t border-slate-200 bg-white/90 backdrop-blur-sm">
+        <button
+          type="button"
+          onClick={() =>
+            canvasRef.current?.setZoom(Math.max(0.1, view.zoom - 0.1), view)
+          }
+          className="rounded p-1 text-slate-600 hover:bg-slate-100"
+          title="Zoom out"
+        >
+          <ZoomOut className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          onClick={() => canvasRef.current?.resetZoom()}
+          className="min-w-[4rem] rounded px-2 py-0.5 text-center font-mono text-xs text-slate-600 hover:bg-slate-100"
+          title="Reset zoom"
+        >
+          {Math.round(view.zoom * 100)}%
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            canvasRef.current?.setZoom(Math.min(5, view.zoom + 0.1), view)
+          }
+          className="rounded p-1 text-slate-600 hover:bg-slate-100"
+          title="Zoom in"
+        >
+          <ZoomIn className="h-4 w-4" />
+        </button>
+        <span className="mx-1 h-4 w-px bg-slate-300" />
+        <button
+          type="button"
+          onClick={() => canvasRef.current?.resetZoom()}
+          className="rounded px-2 py-0.5 text-xs text-slate-600 hover:bg-slate-100"
+          title="Reset zoom"
+        >
+          <Maximize className="inline h-3.5 w-3.5" /> Reset
+        </button>
+      </footer>
     </main>
   );
 }
