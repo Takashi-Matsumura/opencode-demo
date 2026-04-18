@@ -748,9 +748,25 @@ export default function FloatingWorkspace({
             </button>
             <span className="font-mono font-medium text-slate-700">workspace</span>
           </div>
-          <span className="truncate font-mono text-[10px] text-slate-400">
-            {workspace?.path ?? "(no folder open)"}
-          </span>
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="truncate font-mono text-[10px] text-slate-400">
+              {workspace?.path ?? "(no folder open)"}
+            </span>
+            {workspace && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void revealWorkspace(workspace.id);
+                }}
+                className="inline-flex shrink-0 items-center gap-1 rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-600 hover:bg-sky-50 hover:text-sky-700"
+                title="Finder で開く / ホストパスをコピー"
+              >
+                <FolderSymlink className="h-3 w-3" />
+                Finder
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="relative flex flex-nowrap items-center gap-1.5 border-b border-slate-200 bg-white px-2 py-1">
