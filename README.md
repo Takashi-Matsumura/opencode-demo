@@ -20,16 +20,19 @@
                   └─ 裏面: Settings + Shell
                        │ ws://localhost:4097
                        ▼
-            pty-server.ts (ws + node-pty, 複数セッション管理)
-                       │ spawn
+      ┌────────────────────────────────────────┐
+      │ Next.js (:3001) + pty-server (:4097)   │  ← ネイティブ or Docker
+      │   └─ opencode (TUI)                    │
+      └────────────────────────────────────────┘
+                       │ OpenAI 互換 (host networking / localhost)
                        ▼
-            opencode (TUI) ── OpenAI 互換 ──▶ llama-server (:8080)
-                                                    │
-                                                    ▼
-                                                  Gemma
+      llama-server (:8080) ──▶ Gemma   ← 常にホスト側
+      LionFrame (:3000, OIDC Provider) ← 常にホスト側
 ```
 
 ターミナルはシーン座標にアンカーされているため、ホワイトボードをパン／ズームするとそれに追従して移動・拡大縮小します。
+
+`opencode` と `pty-server` を動かす実行環境は **ネイティブ** (`npm run dev:all`) と **Docker コンテナ** (`docker compose up`) の 2 択で、どちらでもブラウザから同じ `http://localhost:3001` で使えます。
 
 ## 主な機能
 
@@ -40,7 +43,11 @@
 - **プロセス安全停止** — ターミナルを閉じると、PTY配下のプロセスツリーを SIGTERM → SIGKILL で段階的に停止。`OPENCODE_SESSION_ID` 環境変数による孤児プロセス追跡。
 - **セッション再接続** — スクリーンロックやネットワーク切断でWebSocketが切れても、PTYセッションを5分間保持。復帰時に自動再接続し、切断中の出力もバッファから復元。
 - **起動時の孤児回収** — PTYサーバ起動時に前回クラッシュで残った孤児プロセスを自動検出・停止。
-- **ワークスペースエクスプローラ** — macOS ネイティブフォルダピッカー、ファイルツリー表示、ファイル内容プレビュー。
+- **ワークスペースエクスプローラ** — macOS ネイティブフォルダピッカー（Docker モードでは in-app ブラウザに自動フォールバック）、ファイルツリー表示、ファイル内容プレビュー。
+- **ユーザー別ワークスペース隔離** — LionFrame OIDC 認証ごとに `~/opencode-demo-workspaces/{sub}/` を専用ホームとして自動作成。外部フォルダは明示登録制。PTY セッションも短命 JWT チケットで所有ユーザーに結び付く。
+- **ドラッグ & ドロップアップロード** — ホストの Finder からファイルやフォルダをドロップするとワークスペース内に再帰的にアップロード。
+- **Finder で開く** — ワークスペースヘッダの「Finder」ボタンで、ネイティブ時は直接 Finder を起動、Docker 時はホストパスをクリップボードへコピー（`⌘⇧G` で貼り付け）。
+- **Docker 対応** — `docker compose up` でエージェント実行環境（Node + opencode CLI + PTY）を隔離コンテナに閉じ込められる。llama.cpp と LionFrame はホスト側のまま利用可能。
 - **描画ツール切替** — Excalidraw の描画ツールバーをフッターから ON/OFF。Draw Over モードでフローティングパネルの上に描画可能。
 - **ズーム制御** — フッターバーからズーム操作、リセット、80% フィット表示（緑丸クリック）。
 
@@ -119,7 +126,9 @@ docker compose up --build
 ## 操作
 
 - **ホワイトボード**: マウスホイール／トラックパッドピンチでズーム、スペース＋ドラッグまたは手のひらツールでパン。
-- **ワークスペース**: 「フォルダを選択...」でプロジェクトを開き、緑の「Coding」ボタンでコーディング用、アンバーの「Business」ボタンでデータ処理用ターミナルをそれぞれ起動。両方を同時に開くことも可能。
+- **ワークスペース**: 「フォルダを選択...」でプロジェクトを開き、緑の「Coding」ボタンでコーディング用、アンバーの「Business」ボタンでデータ処理用ターミナルをそれぞれ起動。両方を同時に開くことも可能。一覧から登録済みワークスペースの切替・削除もできる。
+- **ファイル追加**: ホストの Finder / Explorer からフォルダツリーのペインにファイル・フォルダをドラッグ & ドロップすればワークスペースに取り込める。
+- **Finder で開く**: ヘッダの「Finder」ボタンでワークスペースをホストで開く（Docker 時はパスをクリップボードコピー）。
 - **ターミナル**: ヘッダをドラッグで移動、右下コーナーでリサイズ。赤丸で停止、黄丸で最小化、緑丸でフィット表示。コーディング用はダークテーマ、データ処理用はExcel風グリーンテーマで表示。
 - **表裏切替**: ヘッダ右端のアイコンで OpenCode ↔ Settings/Shell を回転切替。裏面シェルからサーバ起動等が可能。
 - **フッター**: ズーム操作、Reset、Draw Over（パネル上に描画）、Toolbar（Excalidraw 描画ツール表示）。
@@ -137,34 +146,63 @@ docker compose up --build
 | `LIONFRAME_CLIENT_SECRET` | — | LionFrame で登録したクライアントシークレット |
 | `NEXTAUTH_URL` | `http://localhost:3001` | RP（この opencode-demo）の公開 URL。`redirect_uri` 組み立てに使用 |
 | `SESSION_SECRET` | — | `oidc_session` JWT（HS256）の署名鍵。`openssl rand -hex 32` で生成 |
+| `HOST_HOME` | （コンテナ内のみ） | `compose.yml` がホストの `$HOME` を注入。Docker モードで「Finder で開く」時のホストパス変換に使用 |
 
 ## スクリプト
 
 | コマンド | 動作 |
 |---|---|
-| `npm run dev` | Next.js のみ起動 |
-| `npm run dev:pty` | pty-server のみ起動 |
-| `npm run dev:all` | 上記2つを同時起動 (推奨) |
+| `npm run dev` | Next.js のみ起動（:3001） |
+| `npm run dev:pty` | pty-server のみ起動（`.env.local` を `--env-file` で読み込み、:4097） |
+| `npm run dev:all` | 上記2つを同時起動（ネイティブ実行、推奨） |
 | `npm run build` | Next.js 本番ビルド |
 | `npm run lint` | ESLint |
+| `docker compose up` | Docker コンテナで Next.js + pty-server をまとめて起動 |
+| `docker compose build` | コンテナイメージ (Node 22 + opencode CLI) を再ビルド |
+| `docker compose down` | コンテナを停止・削除 |
 
 ## ファイル構成
 
 ```
 app/
   page.tsx                       / のエントリ (dynamic import で SSR 無効化)
+  login/page.tsx                 LionFrame ログインボタンのみのシンプルなページ
+  api/
+    oidc/                        OIDC RP エンドポイント (auth, callback, session, logout)
+    user/workspaces/             ワークスペース一覧・登録・削除・open・reveal
+    workspace/                   ディレクトリ一覧・ファイル取得・アップロード
+    browse/                      Linux コンテナ用の代替ディレクトリブラウザ API
+    pty-ticket/                  PTY 接続用の短命 JWT チケット発行
+    pick-folder/                 macOS osascript フォルダピッカー (Linux では 501)
+    opencode-config/             opencode.json の読み書き
+  components/
+    auth-status.tsx              footer 左端のユーザー名 + ログアウトボタン
+    folder-picker-dialog.tsx     Docker 用の in-app ディレクトリブラウザ
+    register-external-dialog.tsx 外部フォルダ登録確認モーダル
+  lib/
+    oidc/                        jose ベースの OIDC クライアント + セッション
+    user-store.ts                ~/.opencode-demo/users/{sub}.json の読み書き
+    workspace-access.ts          パスが自ユーザーのホーム or 登録外部かを検証
+    workspace-session.ts         token → {sub, rootRealPath, workspaceId} の対応
+    workspace-guard.ts           sub + token + パス検証
+    pty-ticket.ts                PTY チケットの発行・検証
+    host-path.ts                 コンテナ /root/... → ホスト /Users/.../ 変換
   demo/
     components/
       whiteboard-canvas.tsx      Excalidraw を全画面描画、scrollX/Y/zoom を通知
       floating-terminal.tsx      フリップ式ターミナル (coding/business variant対応)
-      floating-workspace.tsx     ファイルエクスプローラ、フォルダ選択、デュアル起動ボタン
-      xterm-view.tsx             xterm.js のマウントと WebSocket 接続 (自動再接続対応)
+      floating-workspace.tsx     ファイルエクスプローラ、DnD アップロード、Finder 起動
+      xterm-view.tsx             xterm.js + WebSocket + チケット取得 (自動再接続対応)
       opencode-settings.tsx      OpenCode 設定パネル (モデル、プロバイダ、権限)
     lib/
       ws-protocol.ts             ブラウザ ↔ pty-server のメッセージ型
 server/
-  pty-server.ts                  ws + node-pty セッション管理 (再接続・タイムアウト対応)
+  pty-server.ts                  ws + node-pty + チケット検証 (sub 一致で再接続許可)
   process-cleanup.ts             プロセスツリー停止、孤児回収、セッションファイル管理
+proxy.ts                         Next.js 16 ルート保護 (oidc_session cookie 有効性で判定)
+Dockerfile                       node:22 + opencode CLI の開発用イメージ
+compose.yml                      host networking + ~/.opencode-demo 等のボリューム構成
+.dockerignore                    Docker build context から除外するファイル
 opencode.json                    llama.cpp プロバイダ設定
 ```
 
