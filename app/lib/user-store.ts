@@ -69,7 +69,19 @@ async function writeProfileAtomic(profile: UserProfile): Promise<void> {
 export async function getUserProfile(sub: string): Promise<UserProfile> {
   await ensureDirs(sub);
   const existing = await readProfile(sub);
-  if (existing) return existing;
+  if (existing) {
+    const homeDir = getUserHomeDirReal(sub);
+    let changed = false;
+    for (const w of existing.workspaces) {
+      const expected = labelFor(w.path, homeDir);
+      if (w.label !== expected) {
+        w.label = expected;
+        changed = true;
+      }
+    }
+    if (changed) await writeProfileAtomic(existing);
+    return existing;
+  }
   const fresh: UserProfile = { sub, workspaces: [] };
   await writeProfileAtomic(fresh);
   return fresh;
@@ -86,9 +98,10 @@ async function mutate(
 }
 
 function labelFor(absPath: string, homeDir: string): string {
+  if (absPath === homeDir) return "ホーム";
   const rel = path.relative(homeDir, absPath);
   if (rel && !rel.startsWith("..") && !path.isAbsolute(rel)) {
-    return rel === "" ? path.basename(absPath) : rel;
+    return rel;
   }
   return path.basename(absPath);
 }

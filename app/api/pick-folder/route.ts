@@ -39,7 +39,8 @@ export async function POST() {
     raw = await pickMac();
   } catch (e) {
     const err = e as NodeJS.ErrnoException & { stderr?: string };
-    if (err.stderr?.includes("User canceled")) {
+    const stderr = err.stderr ?? "";
+    if (stderr.includes("(-128)") || stderr.includes("User canceled")) {
       return NextResponse.json({ canceled: true }, { status: 200 });
     }
     return NextResponse.json(
