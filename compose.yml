@@ -1,0 +1,18 @@
+services:
+  opencode-demo:
+    build: .
+    image: opencode-demo:dev
+    network_mode: host
+    env_file: .env.local
+    working_dir: /app
+    volumes:
+      - ./:/app
+      - /app/node_modules
+      - ~/opencode-demo-workspaces:/root/opencode-demo-workspaces
+      - ~/.opencode-demo:/root/.opencode-demo
+    environment:
+      HOME: /root
+      PTY_CMD: /usr/local/bin/opencode
+      SHELL: /bin/bash
+    tty: true
+    stdin_open: true

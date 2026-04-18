@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import type { View } from "./whiteboard-canvas";
 import RegisterExternalDialog from "../../components/register-external-dialog";
+import FolderPickerDialog from "../../components/folder-picker-dialog";
 
 type ScenePos = { x: number; y: number };
 type SceneSize = { w: number; h: number };
@@ -88,8 +89,13 @@ async function apiReadFile(token: string, path: string): Promise<FilePayload> {
   return (await res.json()) as FilePayload;
 }
 
-async function apiPickFolder(): Promise<{ path: string; type: WorkspaceType } | null> {
+async function apiPickFolder(): Promise<
+  | { kind: "picked"; path: string; type: WorkspaceType }
+  | { kind: "canceled" }
+  | { kind: "unsupported" }
+> {
   const res = await fetch("/api/pick-folder", { method: "POST", cache: "no-store" });
+  if (res.status === 501) return { kind: "unsupported" };
   const data = (await res.json().catch(() => ({}))) as {
     path?: string;
     type?: WorkspaceType;
@@ -97,9 +103,9 @@ async function apiPickFolder(): Promise<{ path: string; type: WorkspaceType } | 
     error?: string;
   };
   if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
-  if (data.canceled) return null;
+  if (data.canceled) return { kind: "canceled" };
   if (!data.path || !data.type) throw new Error("invalid response");
-  return { path: data.path, type: data.type };
+  return { kind: "picked", path: data.path, type: data.type };
 }
 
 async function apiRegisterWorkspace(
@@ -284,6 +290,7 @@ export default function FloatingWorkspace({
   const [registered, setRegistered] = useState<WorkspaceListEntry[]>([]);
   const [listOpen, setListOpen] = useState(false);
   const [pendingExternal, setPendingExternal] = useState<string | null>(null);
+  const [inAppPickerOpen, setInAppPickerOpen] = useState(false);
 
   const refreshList = useCallback(async () => {
     try {
@@ -414,7 +421,11 @@ export default function FloatingWorkspace({
     setError(null);
     try {
       const picked = await apiPickFolder();
-      if (!picked) return;
+      if (picked.kind === "canceled") return;
+      if (picked.kind === "unsupported") {
+        setInAppPickerOpen(true);
+        return;
+      }
       await registerAndOpen(picked.path, false);
     } catch (e) {
       setError((e as Error).message);
@@ -422,6 +433,19 @@ export default function FloatingWorkspace({
       setPicking(false);
     }
   }, [registerAndOpen]);
+
+  const onInAppPicked = useCallback(
+    async (path: string) => {
+      setInAppPickerOpen(false);
+      setError(null);
+      try {
+        await registerAndOpen(path, false);
+      } catch (e) {
+        setError((e as Error).message);
+      }
+    },
+    [registerAndOpen],
+  );
 
   const confirmExternal = useCallback(async () => {
     if (!pendingExternal) return;
@@ -509,6 +533,12 @@ export default function FloatingWorkspace({
           path={pendingExternal}
           onConfirm={confirmExternal}
           onCancel={cancelExternal}
+        />
+      )}
+      {inAppPickerOpen && (
+        <FolderPickerDialog
+          onSelect={(p) => void onInAppPicked(p)}
+          onCancel={() => setInAppPickerOpen(false)}
         />
       )}
       <div
