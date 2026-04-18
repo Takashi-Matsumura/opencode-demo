@@ -12,6 +12,7 @@ services:
       - ~/.opencode-demo:/root/.opencode-demo
     environment:
       HOME: /root
+      HOST_HOME: ${HOME}
       PTY_CMD: /usr/local/bin/opencode
       SHELL: /bin/bash
     tty: true

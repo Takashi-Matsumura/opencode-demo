@@ -20,6 +20,8 @@ import {
   List,
   X,
   ExternalLink,
+  FolderSymlink,
+  Upload,
 } from "lucide-react";
 import type { View } from "./whiteboard-canvas";
 import RegisterExternalDialog from "../../components/register-external-dialog";
@@ -173,6 +175,78 @@ async function apiDeleteWorkspace(id: string): Promise<void> {
   }
 }
 
+async function apiUploadFile(
+  token: string,
+  targetDir: string,
+  relativePath: string,
+  file: File,
+): Promise<void> {
+  const form = new FormData();
+  form.append("token", token);
+  form.append("targetDir", targetDir);
+  form.append("relativePath", relativePath);
+  form.append("file", file);
+  const res = await fetch("/api/workspace/upload", { method: "POST", body: form });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? `HTTP ${res.status}`);
+  }
+}
+
+type DroppedFile = { file: File; relativePath: string };
+
+async function collectFromEntry(
+  entry: FileSystemEntry,
+  prefix: string,
+  out: DroppedFile[],
+): Promise<void> {
+  if (entry.isFile) {
+    const fileEntry = entry as FileSystemFileEntry;
+    const file = await new Promise<File>((resolve, reject) =>
+      fileEntry.file(resolve, reject),
+    );
+    out.push({ file, relativePath: `${prefix}${entry.name}` });
+    return;
+  }
+  if (entry.isDirectory) {
+    const dirEntry = entry as FileSystemDirectoryEntry;
+    const reader = dirEntry.createReader();
+    let done = false;
+    while (!done) {
+      const batch = await new Promise<FileSystemEntry[]>((resolve, reject) =>
+        reader.readEntries(resolve, reject),
+      );
+      if (batch.length === 0) {
+        done = true;
+        break;
+      }
+      for (const child of batch) {
+        await collectFromEntry(child, `${prefix}${entry.name}/`, out);
+      }
+    }
+  }
+}
+
+async function collectDroppedFiles(
+  items: DataTransferItemList,
+): Promise<DroppedFile[]> {
+  const out: DroppedFile[] = [];
+  const promises: Promise<void>[] = [];
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (item.kind !== "file") continue;
+    const entry = (item as unknown as { webkitGetAsEntry?: () => FileSystemEntry | null }).webkitGetAsEntry?.();
+    if (entry) {
+      promises.push(collectFromEntry(entry, "", out));
+    } else {
+      const f = item.getAsFile();
+      if (f) out.push({ file: f, relativePath: f.name });
+    }
+  }
+  await Promise.all(promises);
+  return out;
+}
+
 function TreeRow({
   parentPath,
   entry,
@@ -291,6 +365,13 @@ export default function FloatingWorkspace({
   const [listOpen, setListOpen] = useState(false);
   const [pendingExternal, setPendingExternal] = useState<string | null>(null);
   const [inAppPickerOpen, setInAppPickerOpen] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), 3500);
+    return () => clearTimeout(t);
+  }, [notice]);
 
   const refreshList = useCallback(async () => {
     try {
@@ -473,6 +554,40 @@ export default function FloatingWorkspace({
     [onWorkspaceChange, refreshList, workspace],
   );
 
+  const revealWorkspace = useCallback(async (id: string) => {
+    try {
+      const res = await fetch("/api/user/workspaces/reveal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        opened?: boolean;
+        hostPath?: string;
+        error?: string;
+      };
+      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      if (data.opened) {
+        setNotice("Finder で開きました");
+        return;
+      }
+      if (data.hostPath && typeof navigator.clipboard?.writeText === "function") {
+        try {
+          await navigator.clipboard.writeText(data.hostPath);
+          setNotice(
+            `パスをコピーしました: Finder で ⌘⇧G → 貼り付け (${data.hostPath})`,
+          );
+          return;
+        } catch {}
+      }
+      if (data.hostPath) {
+        setNotice(`ホストパス: ${data.hostPath}`);
+      }
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }, []);
+
   const onToggleDir = useCallback(
     (p: string) => {
       if (!workspace) return;
@@ -522,6 +637,66 @@ export default function FloatingWorkspace({
       }
     }
   }, [expanded, loadDir, selectedFile, workspace]);
+
+  const [dragOver, setDragOver] = useState(false);
+  const [uploadBusy, setUploadBusy] = useState(false);
+  const dragDepthRef = useRef(0);
+
+  const onDropFiles = useCallback(
+    async (e: React.DragEvent) => {
+      e.preventDefault();
+      dragDepthRef.current = 0;
+      setDragOver(false);
+      if (!workspace) return;
+      if (!e.dataTransfer?.items) return;
+      setUploadBusy(true);
+      setError(null);
+      try {
+        const collected = await collectDroppedFiles(e.dataTransfer.items);
+        if (collected.length === 0) return;
+        let done = 0;
+        for (const { file, relativePath } of collected) {
+          await apiUploadFile(workspace.token, workspace.path, relativePath, file);
+          done += 1;
+          setNotice(`アップロード中 ${done}/${collected.length}`);
+        }
+        setNotice(`アップロード完了: ${collected.length} ファイル`);
+        await onRefresh();
+      } catch (err) {
+        setError((err as Error).message);
+      } finally {
+        setUploadBusy(false);
+      }
+    },
+    [onRefresh, workspace],
+  );
+
+  const onDragEnter = useCallback(
+    (e: React.DragEvent) => {
+      if (!workspace) return;
+      if (!e.dataTransfer?.types?.includes("Files")) return;
+      e.preventDefault();
+      dragDepthRef.current += 1;
+      setDragOver(true);
+    },
+    [workspace],
+  );
+
+  const onDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setDragOver(false);
+  }, []);
+
+  const onDragOver = useCallback(
+    (e: React.DragEvent) => {
+      if (!workspace) return;
+      if (!e.dataTransfer?.types?.includes("Files")) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+    },
+    [workspace],
+  );
 
   const left = (scenePos.x + view.x) * view.zoom;
   const top = (scenePos.y + view.y) * view.zoom;
@@ -668,6 +843,14 @@ export default function FloatingWorkspace({
                       </button>
                       <button
                         type="button"
+                        onClick={() => void revealWorkspace(w.id)}
+                        className="shrink-0 rounded p-1 text-slate-400 hover:bg-sky-50 hover:text-sky-600"
+                        title="Finder で開く"
+                      >
+                        <FolderSymlink className="h-3 w-3" />
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => void deleteWorkspace(w.id)}
                         className="shrink-0 rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
                         title="登録を削除"
@@ -687,15 +870,40 @@ export default function FloatingWorkspace({
             {error}
           </div>
         )}
+        {notice && (
+          <div className="border-b border-sky-200 bg-sky-50 px-3 py-1 font-mono text-[11px] text-sky-800 break-all">
+            {notice}
+          </div>
+        )}
 
         <div ref={bodyRef} className="flex min-h-0 flex-1">
           <div
-            className="min-w-0 overflow-auto border-r border-slate-200 bg-slate-50/60 py-1"
+            className={`relative min-w-0 overflow-auto border-r border-slate-200 py-1 transition-colors ${
+              dragOver ? "bg-sky-50 ring-2 ring-inset ring-sky-400" : "bg-slate-50/60"
+            }`}
             style={{ width: `${splitPct}%` }}
+            onDragEnter={onDragEnter}
+            onDragLeave={onDragLeave}
+            onDragOver={onDragOver}
+            onDrop={(e) => void onDropFiles(e)}
           >
+            {dragOver && workspace && (
+              <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
+                <div className="flex items-center gap-2 rounded-md border border-sky-300 bg-white/90 px-3 py-1.5 font-mono text-[11px] text-sky-800 shadow">
+                  <Upload className="h-3.5 w-3.5" />
+                  ドロップで {workspace.label} にアップロード
+                </div>
+              </div>
+            )}
+            {uploadBusy && !dragOver && (
+              <div className="border-b border-sky-200 bg-sky-50 px-3 py-1 font-mono text-[11px] text-sky-700">
+                アップロード中…
+              </div>
+            )}
             {workspace ? (
               <TreeRootRow
                 rootPath={workspace.path}
+                rootLabel={workspace.label}
                 expanded={expanded}
                 childEntries={childEntries}
                 selectedFile={selectedFile}
@@ -756,6 +964,7 @@ export default function FloatingWorkspace({
 
 function TreeRootRow({
   rootPath,
+  rootLabel,
   expanded,
   childEntries,
   selectedFile,
@@ -764,6 +973,7 @@ function TreeRootRow({
   onSelectFile,
 }: {
   rootPath: string;
+  rootLabel?: string;
   expanded: Set<string>;
   childEntries: Map<string, Entry[]>;
   selectedFile: string | null;
@@ -774,7 +984,8 @@ function TreeRootRow({
   const isOpen = expanded.has(rootPath);
   const isLoading = loadingPaths.has(rootPath);
   const children = childEntries.get(rootPath);
-  const rootName = rootPath.split("/").filter(Boolean).pop() ?? rootPath;
+  const rootName =
+    rootLabel ?? rootPath.split("/").filter(Boolean).pop() ?? rootPath;
   return (
     <div>
       <button
