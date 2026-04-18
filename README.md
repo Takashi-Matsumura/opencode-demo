@@ -55,9 +55,19 @@
 
 ```bash
 npm install
+cp .env.local.example .env.local
+# .env.local を編集して LIONFRAME_* と SESSION_SECRET を埋める
+openssl rand -hex 32    # SESSION_SECRET 用
 ```
 
 `opencode.json` はリポジトリに同梱しており、`http://127.0.0.1:8080/v1` の OpenAI 互換エンドポイントを既定プロバイダにしています。別ホスト/別モデルを使う場合は編集してください。
+
+### LionFrame のクライアント登録
+
+LionFrame（`http://localhost:3000` で稼働）の管理 UI でこのアプリを OIDC クライアントとして登録し、以下を設定してください:
+
+- `redirect_uris`: `http://localhost:3001/api/oidc/callback`
+- 発行された `client_id` / `client_secret` を `.env.local` の `LIONFRAME_CLIENT_ID` / `LIONFRAME_CLIENT_SECRET` に設定
 
 ## 起動
 
@@ -73,7 +83,7 @@ npm install
    PTY_CMD=$(which opencode) npm run dev:all
    ```
 
-3. ブラウザで http://localhost:3000 を開く。
+3. ブラウザで http://localhost:3001 を開く（LionFrame が :3000 を使うためポートを変更）。未認証なら `/login` に誘導され、「LionFrame でログイン」で認証フローに入る。
 
 ## 操作
 
@@ -91,6 +101,11 @@ npm install
 | `PTY_CWD` | `process.cwd()` | spawn 時の作業ディレクトリ |
 | `PTY_PORT` | `4097` | WebSocket ポート |
 | `NEXT_PUBLIC_PTY_WS_URL` | `ws://127.0.0.1:4097` | ブラウザから接続する WS URL |
+| `LIONFRAME_ISSUER` | — | LionFrame OIDC Provider の Issuer ベース URL（例: `http://localhost:3000/api/oidc`） |
+| `LIONFRAME_CLIENT_ID` | — | LionFrame で登録したクライアント ID |
+| `LIONFRAME_CLIENT_SECRET` | — | LionFrame で登録したクライアントシークレット |
+| `NEXTAUTH_URL` | `http://localhost:3001` | RP（この opencode-demo）の公開 URL。`redirect_uri` 組み立てに使用 |
+| `SESSION_SECRET` | — | `oidc_session` JWT（HS256）の署名鍵。`openssl rand -hex 32` で生成 |
 
 ## スクリプト
 
@@ -129,6 +144,7 @@ opencode.json                    llama.cpp プロバイダ設定
 - **`PTY_CMD` はフルパス指定が安全**。`tsx` 経由で起動した子プロセスの PATH 解決に依存しないため。
 - **Vercel 等の serverless にはそのままデプロイ不可**。pty-server が常駐 Node.js プロセスを必要とするため、Docker / Railway / Render などへの自前デプロイが必要です。
 - **localhost 専用構成**。WebSocket は無認証なので、外部公開する場合はトークン認証を追加してください。
+- **OIDC 認証は Next.js 配下のみ**。`proxy.ts` で `/login` と `/api/oidc/*` 以外の全ルートを保護していますが、`ws://localhost:4097` の PTY サーバは別プロセスで Next.js を経由しないため、認証対象外です。外部公開時は pty-server 側にも別途認証を追加してください。
 
 ## 使用ライブラリのライセンス
 

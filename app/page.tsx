@@ -6,6 +6,7 @@ import { ZoomIn, ZoomOut, Layers, PenTool } from "lucide-react";
 import type { View, CanvasActions } from "./demo/components/whiteboard-canvas";
 import type { Workspace } from "./demo/components/floating-workspace";
 import type { TerminalSession } from "./demo/components/floating-terminal";
+import AuthStatus from "./components/auth-status";
 
 const WhiteboardCanvas = dynamic(
   () => import("./demo/components/whiteboard-canvas"),
@@ -79,6 +80,9 @@ export default function Home() {
         />
       )}
       <footer className="fixed right-0 bottom-0 left-0 z-[60] flex h-8 items-center justify-center gap-1 border-t border-slate-200 bg-white/90 backdrop-blur-sm">
+        <div className="absolute inset-y-0 left-2 flex items-center">
+          <AuthStatus />
+        </div>
         <button
           type="button"
           onClick={() =>

@@ -5,17 +5,18 @@
   "license": "MIT",
   "author": "Takashi Matsumura",
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 3001",
     "dev:pty": "tsx server/pty-server.ts",
     "dev:all": "concurrently -n next,pty -c cyan,magenta \"npm:dev\" \"npm:dev:pty\"",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -p 3001",
     "lint": "eslint"
   },
   "dependencies": {
     "@excalidraw/excalidraw": "^0.18.0",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
+    "jose": "^6.2.2",
     "lucide-react": "^1.8.0",
     "next": "16.2.3",
     "react": "19.2.4",
