@@ -32,11 +32,11 @@ export default function Home() {
 
   const startCodingOpenCode = () => {
     if (!workspace) return;
-    setCodingSession({ cwd: workspace.path, nonce: Date.now() });
+    setCodingSession({ workspaceId: workspace.id, nonce: Date.now() });
   };
   const startBusinessOpenCode = () => {
     if (!workspace) return;
-    setBusinessSession({ cwd: workspace.path, nonce: Date.now() });
+    setBusinessSession({ workspaceId: workspace.id, nonce: Date.now() });
   };
 
   const stopCodingOpenCode = () => setCodingSession(null);

@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState, type PointerEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent,
+} from "react";
 import dynamic from "next/dynamic";
 import { X, Minus, Maximize2, ArrowUpDown, Plus } from "lucide-react";
 import type { View, SceneRect } from "./whiteboard-canvas";
@@ -11,7 +17,7 @@ const XtermView = dynamic(() => import("./xterm-view"), { ssr: false });
 type ScenePos = { x: number; y: number };
 type SceneSize = { w: number; h: number };
 
-export type TerminalSession = { cwd: string; nonce: number };
+export type TerminalSession = { workspaceId: string; nonce: number };
 export type TerminalVariant = "coding" | "business";
 
 export default function FloatingTerminal({
@@ -55,6 +61,22 @@ export default function FloatingTerminal({
       return next;
     });
   };
+
+  const workspaceId = session?.workspaceId ?? null;
+  const getTicket = useCallback(async () => {
+    if (!workspaceId) throw new Error("no active workspace");
+    const res = await fetch("/api/pty-ticket", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workspaceId }),
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(body.error ?? `ticket HTTP ${res.status}`);
+    }
+    const data = (await res.json()) as { ticket: string };
+    return data.ticket;
+  }, [workspaceId]);
 
   useEffect(() => {
     const cx = slot === "right"
@@ -245,7 +267,7 @@ export default function FloatingTerminal({
               } : undefined}
             >
               {session ? (
-                <XtermView key={`${session.nonce}-${fontNonce}`} cwd={session.cwd} fontSize={fontSize} />
+                <XtermView key={`${session.nonce}-${fontNonce}`} getTicket={getTicket} fontSize={fontSize} />
               ) : (
                 <div className="flex h-full w-full items-center justify-center bg-[#0b0b0f] px-6 text-center font-mono text-xs text-white/50">
                   Workspace でフォルダを選んで「{isBusiness ? "Business" : "Coding"}」ボタンを押してください
@@ -321,7 +343,7 @@ export default function FloatingTerminal({
               {/* Right: Shell */}
               <div className="relative w-1/2">
                 {backNonce > 0 && session ? (
-                  <XtermView key={`${backNonce}-${fontNonce}`} cwd={session.cwd} cmd="shell" fontSize={fontSize} />
+                  <XtermView key={`${backNonce}-${fontNonce}`} getTicket={getTicket} cmd="shell" fontSize={fontSize} />
                 ) : (
                   <div className="flex h-full w-full items-center justify-center bg-[#0b0b0f] px-6 text-center font-mono text-xs text-white/50">
                     OpenCode を起動すると、シェルが使えます

@@ -9,8 +9,20 @@ import { PTY_WS_URL, type ClientMessage, type ServerMessage } from "../lib/ws-pr
 const MAX_RETRIES = 5;
 const RETRY_INTERVAL_MS = 2000;
 
-export default function XtermView({ cwd, cmd, fontSize = 13 }: { cwd?: string | null; cmd?: string | null; fontSize?: number }) {
+export type TicketFetcher = () => Promise<string>;
+
+export default function XtermView({
+  getTicket,
+  cmd,
+  fontSize = 13,
+}: {
+  getTicket: TicketFetcher;
+  cmd?: string | null;
+  fontSize?: number;
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const getTicketRef = useRef(getTicket);
+  getTicketRef.current = getTicket;
 
   useEffect(() => {
     const el = containerRef.current;
@@ -48,22 +60,31 @@ export default function XtermView({ cwd, cmd, fontSize = 13 }: { cwd?: string | 
 
     const dataSub = term.onData((data) => send({ type: "data", data }));
 
-    function buildUrl(): string {
+    async function buildUrl(): Promise<string> {
       const base = PTY_WS_URL.replace(/\/+$/, "");
+      const ticket = await getTicketRef.current();
       const params = new URLSearchParams();
-      if (sessionId) {
-        params.set("sessionId", sessionId);
-      } else {
-        if (cwd) params.set("cwd", cwd);
-        if (cmd) params.set("cmd", cmd);
-      }
-      const qs = params.toString();
-      return qs ? `${base}/?${qs}` : base;
+      params.set("ticket", ticket);
+      if (sessionId) params.set("sessionId", sessionId);
+      if (cmd) params.set("cmd", cmd);
+      return `${base}/?${params.toString()}`;
     }
 
-    function connect() {
+    async function connect() {
       if (disposed) return;
-      ws = new WebSocket(buildUrl());
+      let url: string;
+      try {
+        url = await buildUrl();
+      } catch (e) {
+        const msg = (e as Error).message ?? "ticket fetch failed";
+        term.write(`\r\n\x1b[31m[${msg}]\x1b[0m\r\n`);
+        if (retries < MAX_RETRIES) {
+          retries++;
+          retryTimer = setTimeout(connect, RETRY_INTERVAL_MS);
+        }
+        return;
+      }
+      ws = new WebSocket(url);
       ws.binaryType = "arraybuffer";
 
       ws.onopen = () => {
@@ -86,8 +107,12 @@ export default function XtermView({ cwd, cmd, fontSize = 13 }: { cwd?: string | 
         }
       };
 
-      ws.onclose = () => {
+      ws.onclose = (ev) => {
         if (disposed) return;
+        if (ev.code === 4401 || ev.code === 4403) {
+          term.write(`\r\n\x1b[31m[${ev.reason || "auth rejected"}]\x1b[0m\r\n`);
+          return;
+        }
         if (retries < MAX_RETRIES) {
           retries++;
           term.write(`\r\n\x1b[33m[reconnecting ${retries}/${MAX_RETRIES}...]\x1b[0m\r\n`);
@@ -118,7 +143,7 @@ export default function XtermView({ cwd, cmd, fontSize = 13 }: { cwd?: string | 
       ws?.close();
       term.dispose();
     };
-  }, [cwd, cmd, fontSize]);
+  }, [cmd, fontSize]);
 
   return (
     <div

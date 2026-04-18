@@ -17,13 +17,33 @@ import {
   ChevronDown,
   Maximize2,
   ShieldCheck,
+  List,
+  X,
+  ExternalLink,
 } from "lucide-react";
 import type { View } from "./whiteboard-canvas";
+import RegisterExternalDialog from "../../components/register-external-dialog";
 
 type ScenePos = { x: number; y: number };
 type SceneSize = { w: number; h: number };
 
-export type Workspace = { path: string; token: string };
+export type WorkspaceType = "internal" | "external";
+
+export type Workspace = {
+  id: string;
+  path: string;
+  token: string;
+  label: string;
+  type: WorkspaceType;
+};
+
+type WorkspaceListEntry = {
+  id: string;
+  path: string;
+  label: string;
+  type: WorkspaceType;
+  lastOpenedAt: number;
+};
 
 type Entry = {
   name: string;
@@ -68,21 +88,83 @@ async function apiReadFile(token: string, path: string): Promise<FilePayload> {
   return (await res.json()) as FilePayload;
 }
 
-async function apiPickFolder(): Promise<Workspace | null> {
-  const res = await fetch("/api/pick-folder", {
-    method: "POST",
-    cache: "no-store",
-  });
+async function apiPickFolder(): Promise<{ path: string; type: WorkspaceType } | null> {
+  const res = await fetch("/api/pick-folder", { method: "POST", cache: "no-store" });
   const data = (await res.json().catch(() => ({}))) as {
     path?: string;
-    token?: string;
+    type?: WorkspaceType;
     canceled?: boolean;
     error?: string;
   };
   if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
   if (data.canceled) return null;
-  if (!data.path || !data.token) throw new Error("invalid response");
-  return { path: data.path, token: data.token };
+  if (!data.path || !data.type) throw new Error("invalid response");
+  return { path: data.path, type: data.type };
+}
+
+async function apiRegisterWorkspace(
+  path: string,
+  force = false,
+): Promise<{ ok: true; workspace: WorkspaceListEntry } | { ok: false; requiresConfirmation: true; path: string }> {
+  const res = await fetch("/api/user/workspaces", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path, force }),
+  });
+  const data = (await res.json().catch(() => ({}))) as {
+    workspace?: WorkspaceListEntry;
+    requiresConfirmation?: boolean;
+    path?: string;
+    error?: string;
+  };
+  if (res.status === 409 && data.requiresConfirmation && data.path) {
+    return { ok: false, requiresConfirmation: true, path: data.path };
+  }
+  if (!res.ok || !data.workspace) throw new Error(data.error ?? `HTTP ${res.status}`);
+  return { ok: true, workspace: data.workspace };
+}
+
+async function apiListWorkspaces(): Promise<WorkspaceListEntry[]> {
+  const res = await fetch("/api/user/workspaces", { cache: "no-store" });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? `HTTP ${res.status}`);
+  }
+  const data = (await res.json()) as { workspaces: WorkspaceListEntry[] };
+  return data.workspaces;
+}
+
+async function apiOpenWorkspace(id: string): Promise<Workspace> {
+  const res = await fetch("/api/user/workspaces/open", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id }),
+  });
+  const data = (await res.json().catch(() => ({}))) as {
+    token?: string;
+    workspace?: { id: string; path: string; label: string; type: WorkspaceType };
+    error?: string;
+  };
+  if (!res.ok || !data.token || !data.workspace) {
+    throw new Error(data.error ?? `HTTP ${res.status}`);
+  }
+  return {
+    id: data.workspace.id,
+    path: data.workspace.path,
+    label: data.workspace.label,
+    type: data.workspace.type,
+    token: data.token,
+  };
+}
+
+async function apiDeleteWorkspace(id: string): Promise<void> {
+  const res = await fetch(`/api/user/workspaces?id=${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? `HTTP ${res.status}`);
+  }
 }
 
 function TreeRow({
@@ -199,41 +281,32 @@ export default function FloatingWorkspace({
   const [fileLoading, setFileLoading] = useState(false);
   const [picking, setPicking] = useState(false);
 
-  useEffect(() => {
-    setScenePos({
-      x: Math.max(0, (window.innerWidth - 640) / 2),
-      y: Math.max(0, (window.innerHeight - 460) / 2),
-    });
+  const [registered, setRegistered] = useState<WorkspaceListEntry[]>([]);
+  const [listOpen, setListOpen] = useState(false);
+  const [pendingExternal, setPendingExternal] = useState<string | null>(null);
+
+  const refreshList = useCallback(async () => {
+    try {
+      const list = await apiListWorkspaces();
+      setRegistered(list);
+    } catch (e) {
+      setError((e as Error).message);
+    }
   }, []);
 
-  const dragRef = useRef<{
-    sx: number;
-    sy: number;
-    px: number;
-    py: number;
-  } | null>(null);
-  const resizeRef = useRef<{
-    sx: number;
-    sy: number;
-    sw: number;
-    sh: number;
-  } | null>(null);
-  const splitRef = useRef<{
-    sx: number;
-    startPct: number;
-    containerW: number;
-  } | null>(null);
+  useEffect(() => {
+    void refreshList();
+  }, [refreshList]);
+
+  const dragRef = useRef<{ sx: number; sy: number; px: number; py: number } | null>(null);
+  const resizeRef = useRef<{ sx: number; sy: number; sw: number; sh: number } | null>(null);
+  const splitRef = useRef<{ sx: number; startPct: number; containerW: number } | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
 
   const onHeaderPointerDown = (e: PointerEvent<HTMLDivElement>) => {
     if ((e.target as HTMLElement).closest("button,input")) return;
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    dragRef.current = {
-      sx: e.clientX,
-      sy: e.clientY,
-      px: scenePos.x,
-      py: scenePos.y,
-    };
+    dragRef.current = { sx: e.clientX, sy: e.clientY, px: scenePos.x, py: scenePos.y };
   };
 
   const onHeaderPointerMove = (e: PointerEvent<HTMLDivElement>) => {
@@ -253,12 +326,7 @@ export default function FloatingWorkspace({
   const onResizePointerDown = (e: PointerEvent<HTMLDivElement>) => {
     e.stopPropagation();
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    resizeRef.current = {
-      sx: e.clientX,
-      sy: e.clientY,
-      sw: sceneSize.w,
-      sh: sceneSize.h,
-    };
+    resizeRef.current = { sx: e.clientX, sy: e.clientY, sw: sceneSize.w, sh: sceneSize.h };
   };
 
   const onResizePointerMove = (e: PointerEvent<HTMLDivElement>) => {
@@ -280,11 +348,7 @@ export default function FloatingWorkspace({
     const rect = bodyRef.current?.getBoundingClientRect();
     if (!rect) return;
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    splitRef.current = {
-      sx: e.clientX,
-      startPct: splitPct,
-      containerW: rect.width / view.zoom,
-    };
+    splitRef.current = { sx: e.clientX, startPct: splitPct, containerW: rect.width / view.zoom };
   };
 
   const onSplitPointerMove = (e: PointerEvent<HTMLDivElement>) => {
@@ -301,48 +365,89 @@ export default function FloatingWorkspace({
   };
 
   const loadDir = useCallback(async (token: string, path: string) => {
-    setLoadingPaths((s) => {
-      const n = new Set(s);
-      n.add(path);
-      return n;
-    });
+    setLoadingPaths((s) => { const n = new Set(s); n.add(path); return n; });
     try {
       const entries = await apiListDir(token, path);
-      setChildEntries((m) => {
-        const n = new Map(m);
-        n.set(path, entries);
-        return n;
-      });
+      setChildEntries((m) => { const n = new Map(m); n.set(path, entries); return n; });
       setError(null);
     } catch (e) {
       setError((e as Error).message);
     } finally {
-      setLoadingPaths((s) => {
-        const n = new Set(s);
-        n.delete(path);
-        return n;
-      });
+      setLoadingPaths((s) => { const n = new Set(s); n.delete(path); return n; });
     }
   }, []);
+
+  const openWorkspace = useCallback(
+    async (id: string) => {
+      try {
+        const ws = await apiOpenWorkspace(id);
+        onWorkspaceChange(ws);
+        setExpanded(new Set([ws.path]));
+        setChildEntries(new Map());
+        setSelectedFile(null);
+        setFileContent(null);
+        setListOpen(false);
+        await loadDir(ws.token, ws.path);
+        await refreshList();
+      } catch (e) {
+        setError((e as Error).message);
+      }
+    },
+    [loadDir, onWorkspaceChange, refreshList],
+  );
+
+  const registerAndOpen = useCallback(
+    async (path: string, force: boolean) => {
+      const result = await apiRegisterWorkspace(path, force);
+      if (!result.ok) {
+        setPendingExternal(result.path);
+        return;
+      }
+      await refreshList();
+      await openWorkspace(result.workspace.id);
+    },
+    [openWorkspace, refreshList],
+  );
 
   const pickFolder = useCallback(async () => {
     setPicking(true);
     setError(null);
     try {
-      const ws = await apiPickFolder();
-      if (!ws) return;
-      onWorkspaceChange(ws);
-      setExpanded(new Set([ws.path]));
-      setChildEntries(new Map());
-      setSelectedFile(null);
-      setFileContent(null);
-      await loadDir(ws.token, ws.path);
+      const picked = await apiPickFolder();
+      if (!picked) return;
+      await registerAndOpen(picked.path, false);
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setPicking(false);
     }
-  }, [loadDir, onWorkspaceChange]);
+  }, [registerAndOpen]);
+
+  const confirmExternal = useCallback(async () => {
+    if (!pendingExternal) return;
+    const path = pendingExternal;
+    setPendingExternal(null);
+    try {
+      await registerAndOpen(path, true);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }, [pendingExternal, registerAndOpen]);
+
+  const cancelExternal = useCallback(() => setPendingExternal(null), []);
+
+  const deleteWorkspace = useCallback(
+    async (id: string) => {
+      try {
+        await apiDeleteWorkspace(id);
+        if (workspace?.id === id) onWorkspaceChange(null);
+        await refreshList();
+      } catch (e) {
+        setError((e as Error).message);
+      }
+    },
+    [onWorkspaceChange, refreshList, workspace],
+  );
 
   const onToggleDir = useCallback(
     (p: string) => {
@@ -353,9 +458,7 @@ export default function FloatingWorkspace({
           n.delete(p);
         } else {
           n.add(p);
-          if (!childEntries.has(p)) {
-            void loadDir(workspace.token, p);
-          }
+          if (!childEntries.has(p)) void loadDir(workspace.token, p);
         }
         return n;
       });
@@ -400,168 +503,224 @@ export default function FloatingWorkspace({
   const top = (scenePos.y + view.y) * view.zoom;
 
   return (
-    <div
-      className="fixed z-40 flex flex-col overflow-hidden rounded-lg border border-slate-300 bg-white shadow-2xl shadow-slate-900/20"
-      style={{
-        left: 0,
-        top: 0,
-        width: sceneSize.w,
-        height: sceneSize.h,
-        transform: `translate(${left}px, ${top}px) scale(${view.zoom})`,
-        transformOrigin: "top left",
-      }}
-      onPointerDown={(e) => e.stopPropagation()}
-    >
+    <>
+      {pendingExternal && (
+        <RegisterExternalDialog
+          path={pendingExternal}
+          onConfirm={confirmExternal}
+          onCancel={cancelExternal}
+        />
+      )}
       <div
-        className="flex h-9 cursor-grab items-center justify-between gap-2 rounded-t-lg border-b border-slate-200 bg-slate-50 px-3 text-xs text-slate-600 active:cursor-grabbing select-none"
-        onPointerDown={onHeaderPointerDown}
-        onPointerMove={onHeaderPointerMove}
-        onPointerUp={onHeaderPointerUp}
+        className="fixed z-40 flex flex-col overflow-hidden rounded-lg border border-slate-300 bg-white shadow-2xl shadow-slate-900/20"
+        style={{
+          left: 0,
+          top: 0,
+          width: sceneSize.w,
+          height: sceneSize.h,
+          transform: `translate(${left}px, ${top}px) scale(${view.zoom})`,
+          transformOrigin: "top left",
+        }}
+        onPointerDown={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onZoomToFit?.({ x: scenePos.x, y: scenePos.y, w: sceneSize.w, h: sceneSize.h });
-            }}
-            className="group h-3 w-3 rounded-full bg-[#28c840] hover:brightness-110"
-            title="80% フィット表示"
-          >
-            <Maximize2 className="hidden h-2.5 w-2.5 stroke-[3] text-black/60 group-hover:block" style={{ margin: '0.5px' }} />
-          </button>
-          <span className="font-mono font-medium text-slate-700">
-            workspace
+        <div
+          className="flex h-9 cursor-grab items-center justify-between gap-2 rounded-t-lg border-b border-slate-200 bg-slate-50 px-3 text-xs text-slate-600 active:cursor-grabbing select-none"
+          onPointerDown={onHeaderPointerDown}
+          onPointerMove={onHeaderPointerMove}
+          onPointerUp={onHeaderPointerUp}
+        >
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onZoomToFit?.({ x: scenePos.x, y: scenePos.y, w: sceneSize.w, h: sceneSize.h });
+              }}
+              className="group h-3 w-3 rounded-full bg-[#28c840] hover:brightness-110"
+              title="80% フィット表示"
+            >
+              <Maximize2 className="hidden h-2.5 w-2.5 stroke-[3] text-black/60 group-hover:block" style={{ margin: '0.5px' }} />
+            </button>
+            <span className="font-mono font-medium text-slate-700">workspace</span>
+          </div>
+          <span className="truncate font-mono text-[10px] text-slate-400">
+            {workspace?.path ?? "(no folder open)"}
           </span>
         </div>
-        <span className="truncate font-mono text-[10px] text-slate-400">
-          {workspace?.path ?? "(no folder open)"}
-        </span>
-      </div>
 
-      <div className="flex flex-nowrap items-center gap-1.5 border-b border-slate-200 bg-white px-2 py-1">
-        <button
-          type="button"
-          onClick={() => void pickFolder()}
-          disabled={picking}
-          className="inline-flex shrink-0 items-center gap-1 rounded border border-sky-300 bg-sky-50 px-2 py-1 text-xs font-medium text-sky-700 hover:bg-sky-100 disabled:opacity-40"
-        >
-          <FolderOpen className="h-3.5 w-3.5 shrink-0" />
-          <span className="truncate">{picking ? "選択中…" : "フォルダを選択…"}</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => void onRefresh()}
-          disabled={!workspace}
-          className="inline-flex shrink-0 items-center rounded border border-slate-300 bg-white p-1 text-slate-700 hover:bg-slate-50 disabled:opacity-30"
-          title="Refresh"
-        >
-          <RefreshCw className="h-3.5 w-3.5" />
-        </button>
-        <div className="ml-auto flex shrink-0 items-center gap-1.5">
+        <div className="relative flex flex-nowrap items-center gap-1.5 border-b border-slate-200 bg-white px-2 py-1">
           <button
             type="button"
-            onClick={onStartOpenCode}
-            disabled={!workspace}
-            className="inline-flex shrink-0 items-center gap-1 rounded border border-[#15151c] bg-[#15151c] px-2 py-1 text-xs font-semibold text-white shadow-sm hover:bg-[#2a2a35] disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
-            title={
-              workspace
-                ? `Coding を ${workspace.path} で起動`
-                : "先にフォルダを選択してください"
-            }
+            onClick={() => void pickFolder()}
+            disabled={picking}
+            className="inline-flex shrink-0 items-center gap-1 rounded border border-sky-300 bg-sky-50 px-2 py-1 text-xs font-medium text-sky-700 hover:bg-sky-100 disabled:opacity-40"
           >
-            <Play className="h-3.5 w-3.5 shrink-0" />
-            Coding
+            <FolderOpen className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">{picking ? "選択中…" : "フォルダを選択…"}</span>
           </button>
           <button
             type="button"
-            onClick={onStartBusinessOpenCode}
-            disabled={!workspace}
-            className="inline-flex shrink-0 items-center gap-1 rounded border border-[#217346] bg-[#217346] px-2 py-1 text-xs font-semibold text-white shadow-sm hover:bg-[#1a5c38] disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
-            title={
-              workspace
-                ? `Business を ${workspace.path} で起動`
-                : "先にフォルダを選択してください"
-            }
+            onClick={() => setListOpen((v) => !v)}
+            className={`inline-flex shrink-0 items-center gap-1 rounded border px-2 py-1 text-xs font-medium ${
+              listOpen
+                ? "border-slate-400 bg-slate-100 text-slate-800"
+                : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+            }`}
+            title="登録済みワークスペース"
           >
-            <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
-            Business
+            <List className="h-3.5 w-3.5" />
+            一覧 ({registered.length})
           </button>
-        </div>
-      </div>
+          <button
+            type="button"
+            onClick={() => void onRefresh()}
+            disabled={!workspace}
+            className="inline-flex shrink-0 items-center rounded border border-slate-300 bg-white p-1 text-slate-700 hover:bg-slate-50 disabled:opacity-30"
+            title="Refresh"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+          </button>
+          <div className="ml-auto flex shrink-0 items-center gap-1.5">
+            <button
+              type="button"
+              onClick={onStartOpenCode}
+              disabled={!workspace}
+              className="inline-flex shrink-0 items-center gap-1 rounded border border-[#15151c] bg-[#15151c] px-2 py-1 text-xs font-semibold text-white shadow-sm hover:bg-[#2a2a35] disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
+              title={workspace ? `Coding を ${workspace.path} で起動` : "先にフォルダを選択してください"}
+            >
+              <Play className="h-3.5 w-3.5 shrink-0" />
+              Coding
+            </button>
+            <button
+              type="button"
+              onClick={onStartBusinessOpenCode}
+              disabled={!workspace}
+              className="inline-flex shrink-0 items-center gap-1 rounded border border-[#217346] bg-[#217346] px-2 py-1 text-xs font-semibold text-white shadow-sm hover:bg-[#1a5c38] disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
+              title={workspace ? `Business を ${workspace.path} で起動` : "先にフォルダを選択してください"}
+            >
+              <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
+              Business
+            </button>
+          </div>
 
-      {error && (
-        <div className="border-b border-rose-200 bg-rose-50 px-3 py-1 font-mono text-[11px] text-rose-700">
-          {error}
+          {listOpen && (
+            <div className="absolute left-2 top-full z-10 mt-1 max-h-72 w-80 overflow-auto rounded-md border border-slate-200 bg-white shadow-lg">
+              {registered.length === 0 ? (
+                <div className="px-3 py-2 font-mono text-[11px] text-slate-400">
+                  登録済みのワークスペースはありません
+                </div>
+              ) : (
+                <ul className="divide-y divide-slate-100">
+                  {registered.map((w) => (
+                    <li key={w.id} className="flex items-center gap-1 px-2 py-1.5">
+                      <button
+                        type="button"
+                        onClick={() => void openWorkspace(w.id)}
+                        className="min-w-0 flex-1 text-left"
+                      >
+                        <div className="flex items-center gap-1">
+                          <span className="truncate text-xs font-medium text-slate-800">
+                            {w.label}
+                          </span>
+                          {w.type === "external" && (
+                            <span
+                              title="外部フォルダ"
+                              className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-medium text-amber-800"
+                            >
+                              <ExternalLink className="h-2.5 w-2.5" />
+                              external
+                            </span>
+                          )}
+                        </div>
+                        <div className="truncate font-mono text-[10px] text-slate-400">
+                          {w.path}
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void deleteWorkspace(w.id)}
+                        className="shrink-0 rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                        title="登録を削除"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
         </div>
-      )}
 
-      <div ref={bodyRef} className="flex min-h-0 flex-1">
-        <div
-          className="min-w-0 overflow-auto border-r border-slate-200 bg-slate-50/60 py-1"
-          style={{ width: `${splitPct}%` }}
-        >
-          {workspace ? (
-            <TreeRootRow
-              rootPath={workspace.path}
-              expanded={expanded}
-              childEntries={childEntries}
-              selectedFile={selectedFile}
-              loadingPaths={loadingPaths}
-              onToggleDir={onToggleDir}
-              onSelectFile={onSelectFile}
-            />
-          ) : (
-            <div className="px-3 py-2 font-mono text-xs text-slate-400">
-              「フォルダを選択…」を押すと Finder が開きます
-            </div>
-          )}
-        </div>
-        <div
-          className="w-1 shrink-0 cursor-ew-resize bg-slate-200 hover:bg-sky-300"
-          onPointerDown={onSplitPointerDown}
-          onPointerMove={onSplitPointerMove}
-          onPointerUp={onSplitPointerUp}
-        />
-        <div className="relative min-w-0 flex-1 overflow-auto bg-white">
-          {fileLoading && (
-            <div className="px-3 py-2 font-mono text-xs text-slate-400">
-              reading…
-            </div>
-          )}
-          {!fileLoading && fileContent && (
-            <>
-              <div className="sticky top-0 border-b border-slate-200 bg-slate-50 px-3 py-1 font-mono text-[10px] text-slate-500">
-                {fileContent.path.split("/").pop()}
-                {fileContent.truncated && (
-                  <span className="ml-2 text-amber-600">
-                    (truncated to 512KB)
-                  </span>
-                )}
-              </div>
-              <pre className="px-3 py-2 font-mono text-[11px] whitespace-pre-wrap break-words text-slate-800">
-                {fileContent.content}
-              </pre>
-            </>
-          )}
-          {!fileLoading && !fileContent && (
-            <div className="px-3 py-2 font-mono text-xs text-slate-400">
-              ファイルを選択
-            </div>
-          )}
+        {error && (
+          <div className="border-b border-rose-200 bg-rose-50 px-3 py-1 font-mono text-[11px] text-rose-700">
+            {error}
+          </div>
+        )}
+
+        <div ref={bodyRef} className="flex min-h-0 flex-1">
           <div
-            className="absolute right-0 bottom-0 h-4 w-4 cursor-nwse-resize"
-            onPointerDown={onResizePointerDown}
-            onPointerMove={onResizePointerMove}
-            onPointerUp={onResizePointerUp}
-            style={{
-              background:
-                "linear-gradient(135deg, transparent 50%, rgba(100,116,139,0.4) 50%)",
-            }}
+            className="min-w-0 overflow-auto border-r border-slate-200 bg-slate-50/60 py-1"
+            style={{ width: `${splitPct}%` }}
+          >
+            {workspace ? (
+              <TreeRootRow
+                rootPath={workspace.path}
+                expanded={expanded}
+                childEntries={childEntries}
+                selectedFile={selectedFile}
+                loadingPaths={loadingPaths}
+                onToggleDir={onToggleDir}
+                onSelectFile={onSelectFile}
+              />
+            ) : (
+              <div className="px-3 py-2 font-mono text-xs text-slate-400">
+                「一覧」から既存のワークスペースを開くか、「フォルダを選択…」で追加してください。
+              </div>
+            )}
+          </div>
+          <div
+            className="w-1 shrink-0 cursor-ew-resize bg-slate-200 hover:bg-sky-300"
+            onPointerDown={onSplitPointerDown}
+            onPointerMove={onSplitPointerMove}
+            onPointerUp={onSplitPointerUp}
           />
+          <div className="relative min-w-0 flex-1 overflow-auto bg-white">
+            {fileLoading && (
+              <div className="px-3 py-2 font-mono text-xs text-slate-400">
+                reading…
+              </div>
+            )}
+            {!fileLoading && fileContent && (
+              <>
+                <div className="sticky top-0 border-b border-slate-200 bg-slate-50 px-3 py-1 font-mono text-[10px] text-slate-500">
+                  {fileContent.path.split("/").pop()}
+                  {fileContent.truncated && (
+                    <span className="ml-2 text-amber-600">(truncated to 512KB)</span>
+                  )}
+                </div>
+                <pre className="px-3 py-2 font-mono text-[11px] whitespace-pre-wrap break-words text-slate-800">
+                  {fileContent.content}
+                </pre>
+              </>
+            )}
+            {!fileLoading && !fileContent && (
+              <div className="px-3 py-2 font-mono text-xs text-slate-400">ファイルを選択</div>
+            )}
+            <div
+              className="absolute right-0 bottom-0 h-4 w-4 cursor-nwse-resize"
+              onPointerDown={onResizePointerDown}
+              onPointerMove={onResizePointerMove}
+              onPointerUp={onResizePointerUp}
+              style={{
+                background:
+                  "linear-gradient(135deg, transparent 50%, rgba(100,116,139,0.4) 50%)",
+              }}
+            />
+          </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }
 

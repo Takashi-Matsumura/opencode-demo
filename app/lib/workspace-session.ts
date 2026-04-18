@@ -1,11 +1,25 @@
-const sessions = new Map<string, string>();
+type Session = {
+  sub: string;
+  rootRealPath: string;
+  workspaceId: string;
+};
 
-export function registerSession(rootRealPath: string): string {
+const sessions = new Map<string, Session>();
+
+export function registerSession(
+  sub: string,
+  rootRealPath: string,
+  workspaceId: string,
+): string {
   const token = crypto.randomUUID();
-  sessions.set(token, rootRealPath);
+  sessions.set(token, { sub, rootRealPath, workspaceId });
   return token;
 }
 
-export function getSessionRoot(token: string): string | null {
+export function getSession(token: string): Session | null {
   return sessions.get(token) ?? null;
+}
+
+export function revokeSession(token: string): void {
+  sessions.delete(token);
 }

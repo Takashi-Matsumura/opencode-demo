@@ -2,24 +2,24 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { NextResponse, type NextRequest } from "next/server";
 import { resolveWithinSession } from "@/app/lib/workspace-guard";
+import { getSessionUser } from "@/app/lib/oidc/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const CONFIG_FILE = "opencode.json";
 
-function resolveCwd(token: string, cwd: string) {
-  return resolveWithinSession(token, cwd);
-}
-
 export async function GET(request: NextRequest) {
+  const user = await getSessionUser();
+  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+
   const token = request.nextUrl.searchParams.get("token");
   const cwd = request.nextUrl.searchParams.get("cwd");
   if (!token || !cwd) {
     return NextResponse.json({ error: "missing token or cwd" }, { status: 400 });
   }
 
-  const check = resolveCwd(token, cwd);
+  const check = await resolveWithinSession(token, cwd, user.sub);
   if (!check.ok) return NextResponse.json({ error: "forbidden" }, { status: check.status });
 
   const filePath = path.join(check.path, CONFIG_FILE);
@@ -32,13 +32,16 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PUT(request: NextRequest) {
+  const user = await getSessionUser();
+  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+
   const token = request.nextUrl.searchParams.get("token");
   const cwd = request.nextUrl.searchParams.get("cwd");
   if (!token || !cwd) {
     return NextResponse.json({ error: "missing token or cwd" }, { status: 400 });
   }
 
-  const check = resolveCwd(token, cwd);
+  const check = await resolveWithinSession(token, cwd, user.sub);
   if (!check.ok) return NextResponse.json({ error: "forbidden" }, { status: check.status });
 
   const body = await request.json();

@@ -1,14 +1,13 @@
 import { WebSocketServer, WebSocket } from "ws";
-import { statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import * as pty from "@homebridge/node-pty-prebuilt-multiarch";
 import type { IPty } from "@homebridge/node-pty-prebuilt-multiarch";
 import type { IncomingMessage } from "node:http";
 import { killTree, saveSession, removeSession, reapOrphans } from "./process-cleanup.js";
+import { verifyPtyTicket } from "../app/lib/pty-ticket.js";
 
 const PORT = Number(process.env.PTY_PORT ?? 4097);
 const OC_CMD = process.env.PTY_CMD ?? "opencode";
-const DEFAULT_CWD = process.env.PTY_CWD ?? process.cwd();
 const USER_SHELL = process.env.SHELL ?? "/bin/zsh";
 const HEARTBEAT_MS = 15_000;
 const DISCONNECT_TIMEOUT_MS = 5 * 60 * 1000;
@@ -23,6 +22,8 @@ interface Session {
   ws: WebSocket | null;
   pid: number;
   sessionId: string;
+  sub: string;
+  cwd: string;
   outputBuffer: string[];
   outputBufferLen: number;
   disconnectTimer: ReturnType<typeof setTimeout> | null;
@@ -39,21 +40,22 @@ reapOrphans().then(() => {
 const wss = new WebSocketServer({ port: PORT });
 
 console.log(`[pty-server] listening on ws://127.0.0.1:${PORT}`);
-console.log(`[pty-server] cmd=${OC_CMD} shell=${USER_SHELL} default cwd=${DEFAULT_CWD}`);
-
-function pickCwd(req: IncomingMessage): string {
-  const url = new URL(req.url ?? "/", "http://localhost");
-  const q = url.searchParams.get("cwd");
-  if (!q) return DEFAULT_CWD;
-  try {
-    if (statSync(q).isDirectory()) return q;
-  } catch {}
-  return DEFAULT_CWD;
+console.log(`[pty-server] cmd=${OC_CMD} shell=${USER_SHELL}`);
+if (!process.env.SESSION_SECRET) {
+  console.warn(
+    "[pty-server] WARNING: SESSION_SECRET not set — all tickets will be verified against the dev fallback key. Set it via `npm run dev:pty` (with --env-file=.env.local) or export before start.",
+  );
 }
 
 function pickParam(req: IncomingMessage, key: string): string | null {
   const url = new URL(req.url ?? "/", "http://localhost");
   return url.searchParams.get(key);
+}
+
+function rejectAndClose(ws: WebSocket, code: number, reason: string): void {
+  try {
+    ws.close(code, reason);
+  } catch {}
 }
 
 function startHeartbeat(s: Session): void {
@@ -72,7 +74,7 @@ async function destroySession(s: Session): Promise<void> {
   s.dead = true;
   stopHeartbeat(s);
   if (s.disconnectTimer) { clearTimeout(s.disconnectTimer); s.disconnectTimer = null; }
-  console.log(`[pty-server] destroying session=${s.sessionId} pid=${s.pid}`);
+  console.log(`[pty-server] destroying session=${s.sessionId} pid=${s.pid} sub=${s.sub}`);
 
   try { process.kill(-s.pid, "SIGTERM"); } catch {}
   try { s.term.kill(); } catch {}
@@ -119,10 +121,15 @@ function attachWs(s: Session, ws: WebSocket): void {
   });
 }
 
-function createSession(ws: WebSocket, cwd: string, cmdOverride: string | null): void {
+function createSession(
+  ws: WebSocket,
+  sub: string,
+  cwd: string,
+  cmdOverride: string | null,
+): void {
   const sessionId = randomUUID();
   const activeCmd = cmdOverride ?? OC_CMD;
-  console.log(`[pty-server] new session=${sessionId} cwd=${cwd} cmd=${activeCmd}`);
+  console.log(`[pty-server] new session=${sessionId} sub=${sub} cwd=${cwd} cmd=${activeCmd}`);
 
   const escapedCwd = cwd.replace(/'/g, "'\\''");
   const isShellMode = cmdOverride === "shell";
@@ -139,6 +146,7 @@ function createSession(ws: WebSocket, cwd: string, cmdOverride: string | null): 
       TERM: "xterm-256color",
       LANG: process.env.LANG ?? "en_US.UTF-8",
       OPENCODE_SESSION_ID: sessionId,
+      OPENCODE_USER_SUB: sub,
     } as Record<string, string>,
   });
 
@@ -147,6 +155,8 @@ function createSession(ws: WebSocket, cwd: string, cmdOverride: string | null): 
     ws: null,
     pid: term.pid,
     sessionId,
+    sub,
+    cwd,
     outputBuffer: [],
     outputBufferLen: 0,
     disconnectTimer: null,
@@ -177,13 +187,33 @@ function createSession(ws: WebSocket, cwd: string, cmdOverride: string | null): 
   attachWs(s, ws);
 }
 
-wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
-  const existingId = pickParam(req, "sessionId");
+wss.on("connection", async (ws: WebSocket, req: IncomingMessage) => {
+  const ticket = pickParam(req, "ticket");
+  if (!ticket) {
+    console.warn("[pty-server] connection rejected: missing ticket");
+    rejectAndClose(ws, 4401, "missing ticket");
+    return;
+  }
 
+  const payload = await verifyPtyTicket(ticket);
+  if (!payload) {
+    console.warn("[pty-server] connection rejected: invalid or expired ticket");
+    rejectAndClose(ws, 4401, "invalid ticket");
+    return;
+  }
+
+  const existingId = pickParam(req, "sessionId");
   if (existingId) {
     const s = sessions.get(existingId);
     if (s && !s.dead) {
-      console.log(`[pty-server] reconnecting session=${existingId}`);
+      if (s.sub !== payload.sub) {
+        console.warn(
+          `[pty-server] connection rejected: ticket.sub=${payload.sub} != session.sub=${s.sub}`,
+        );
+        rejectAndClose(ws, 4403, "sub mismatch");
+        return;
+      }
+      console.log(`[pty-server] reconnecting session=${existingId} sub=${payload.sub}`);
       if (s.ws?.readyState === WebSocket.OPEN) s.ws.close();
       attachWs(s, ws);
       return;
@@ -191,9 +221,8 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     console.log(`[pty-server] session=${existingId} not found, creating new`);
   }
 
-  const cwd = pickCwd(req);
   const cmdOverride = pickParam(req, "cmd");
-  createSession(ws, cwd, cmdOverride);
+  createSession(ws, payload.sub, payload.cwd, cmdOverride);
 });
 
 async function shutdownAll(signal: string) {

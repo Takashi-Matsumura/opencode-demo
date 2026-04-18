@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { NextResponse, type NextRequest } from "next/server";
 import { resolveWithinSession } from "@/app/lib/workspace-guard";
+import { getSessionUser } from "@/app/lib/oidc/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,6 +15,9 @@ type Entry = {
 };
 
 export async function GET(request: NextRequest) {
+  const user = await getSessionUser();
+  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+
   const token = request.nextUrl.searchParams.get("token");
   const raw = request.nextUrl.searchParams.get("path");
   if (!token || !raw) {
@@ -23,7 +27,7 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const gate = resolveWithinSession(token, raw);
+  const gate = await resolveWithinSession(token, raw, user.sub);
   if (!gate.ok) {
     const msg =
       gate.status === 401

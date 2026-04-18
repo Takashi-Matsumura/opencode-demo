@@ -3,7 +3,8 @@ import { realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import { NextResponse } from "next/server";
-import { registerSession } from "@/app/lib/workspace-session";
+import { getSessionUser } from "@/app/lib/oidc/session";
+import { classifyPath } from "@/app/lib/workspace-access";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,6 +21,9 @@ async function pickMac(): Promise<string> {
 }
 
 export async function POST() {
+  const user = await getSessionUser();
+  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+
   if (process.platform !== "darwin") {
     return NextResponse.json(
       {
@@ -62,6 +66,6 @@ export async function POST() {
     return NextResponse.json({ error: "path unresolvable" }, { status: 404 });
   }
 
-  const token = registerSession(real);
-  return NextResponse.json({ path: real, token });
+  const { type } = classifyPath(user.sub, real);
+  return NextResponse.json({ path: real, type });
 }
