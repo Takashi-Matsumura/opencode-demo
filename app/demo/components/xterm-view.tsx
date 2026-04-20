@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
 import { PTY_WS_URL, type ClientMessage, type ServerMessage } from "../lib/ws-protocol";
 
@@ -30,8 +31,10 @@ export default function XtermView({
 
     const term = new Terminal({
       fontFamily:
-        '"Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace',
+        'ui-monospace, SFMono-Regular, Menlo, "Geist Mono", monospace',
       fontSize,
+      lineHeight: 1.0,
+      letterSpacing: 0,
       cursorBlink: true,
       theme: {
         background: "#0b0b0f",
@@ -43,6 +46,11 @@ export default function XtermView({
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(el);
+    try {
+      const webgl = new WebglAddon();
+      webgl.onContextLoss(() => webgl.dispose());
+      term.loadAddon(webgl);
+    } catch {}
     fit.fit();
 
     const textarea = el.querySelector("textarea");
