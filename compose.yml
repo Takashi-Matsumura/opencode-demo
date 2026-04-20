@@ -2,6 +2,7 @@ services:
   opencode-demo:
     build: .
     image: opencode-demo:dev
+    container_name: opencode-dev
     network_mode: host
     env_file: .env.local
     working_dir: /app
