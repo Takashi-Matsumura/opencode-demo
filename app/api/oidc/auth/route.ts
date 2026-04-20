@@ -18,7 +18,7 @@ export async function GET() {
     return NextResponse.redirect(
       new URL(
         `/login?error=${encodeURIComponent(message)}`,
-        process.env.NEXTAUTH_URL ?? "http://localhost:3001",
+        process.env.NEXTAUTH_URL ?? "http://localhost:3000",
       ),
     );
   }

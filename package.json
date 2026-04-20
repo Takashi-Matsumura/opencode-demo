@@ -5,11 +5,11 @@
   "license": "MIT",
   "author": "Takashi Matsumura",
   "scripts": {
-    "dev": "next dev -p 3001",
+    "dev": "next dev -p 3000",
     "dev:pty": "node --env-file=.env.local --import tsx server/pty-server.ts",
     "dev:all": "concurrently -n next,pty -c cyan,magenta \"npm:dev\" \"npm:dev:pty\"",
     "build": "next build",
-    "start": "next start -p 3001",
+    "start": "next start -p 3000",
     "lint": "eslint"
   },
   "dependencies": {

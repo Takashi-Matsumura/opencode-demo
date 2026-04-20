@@ -17,7 +17,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm install
 
-EXPOSE 3001 4097
+EXPOSE 3000 4097
 
 ENV HOME=/root
 ENV PTY_CMD=/usr/local/bin/opencode
