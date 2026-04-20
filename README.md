@@ -215,6 +215,64 @@ cp vision-rules.md "$WS/"
 - Q4_K_M 量子化 + デフォルト視覚トークン予算では細かい OCR は精度不足。スクリーンショットの大まかな把握には十分。
 - ブラウザ内 PTY の構造上、OpenCode TUI にクリップボード画像を直接ペースト／ドロップで渡すことはできません。必ずワークスペース内のファイルを経由してください。
 
+## Excel / CSV 分析（Business variant）
+
+社内ユーザーが表データを生成 AI に扱わせることを想定した、Business ターミナル向けのブリッジです。
+
+### 仕組み
+
+```
+OpenCode (Gemma 4 等, テキスト)                 裏面 UI (ブラウザ)
+   │ tool_call                                   │
+   ▼                                             ▼
+.opencode/tools/read_excel.ts        /api/workspace/excel (GET)
+   │ xlsx.read (SheetJS)                    │ xlsx.read (SheetJS)
+   ▼                                             ▼
+Markdown 表 → AI の回答根拠に                HTML テーブルでプレビュー
+```
+
+UI 側（Business 裏面の右ペイン「Excel Files」）はワークスペースを再帰スキャンして `.xlsx/.xls/.xlsm/.csv` を一覧表示し、クリックでシートタブ付きのテーブルプレビューを出します。AI 側は `read_excel` ツールで同じファイルを Markdown 表として取得し、`business-rules.md` のルールに従って要約・分析します。
+
+### セットアップ
+
+各 Business ワークスペース (`~/opencode-demo-workspaces/{sub}/`) にテンプレートをコピーします:
+
+```bash
+WS=~/opencode-demo-workspaces/<workspace-id>
+mkdir -p "$WS/.opencode/tools"
+cp .opencode/tools/read_excel.ts "$WS/.opencode/tools/"
+cp business-rules.md "$WS/"
+
+# read_excel.ts が依存する xlsx をワークスペースにインストール（初回のみ）
+cd "$WS" && npm init -y && npm install xlsx
+```
+
+`opencode.json` には `instructions` に `business-rules.md` を追加します（vision-rules.md と同列に書けます）:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": ["business-rules.md"],
+  "provider": { ... },
+  "model": "llamacpp/gemma-4-e4b-it-Q4_K_M.gguf"
+}
+```
+
+### UI の使い方
+
+1. ワークスペースを開いて Business ターミナルを起動
+2. ヘッダ右端のフリップアイコンで裏面を開く
+3. 右ペイン上段「Excel Files」に `.xlsx/.xls/.xlsm/.csv` の一覧が表示される（最大 5 階層まで再帰探索）
+4. ファイルをクリックするとシートタブ + テーブルプレビューが表示される
+5. 「Copy prompt」ボタンで AI 要約依頼用のプロンプトをクリップボードにコピー → OpenCode チャットに貼り付け
+
+### 制限
+
+- 10 MB を超えるファイルは API 側で 413 を返します。大きい CSV はあらかじめ分割してください
+- プレビュー表示は先頭 500 行まで。全量表示はしません（AI 側は `max_rows` 引数で最大 1000 行）
+- 書き込み・編集機能はなく、read-only です
+- xlsx パッケージはワークスペースの `node_modules` にインストールが必要です（AI ツール側の都合）
+
 ## 環境変数
 
 | 変数 | 既定値 | 用途 |

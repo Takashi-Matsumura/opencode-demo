@@ -11,6 +11,7 @@ import dynamic from "next/dynamic";
 import { X, Minus, Maximize2, ArrowUpDown, Plus } from "lucide-react";
 import type { View, SceneRect } from "./whiteboard-canvas";
 import OpenCodeSettings from "./opencode-settings";
+import BusinessExcelPanel from "./business-excel-panel";
 
 const XtermView = dynamic(() => import("./xterm-view"), { ssr: false });
 
@@ -310,9 +311,9 @@ export default function FloatingTerminal({
               } : undefined}
             >
               {/* Left: Settings */}
-              <div className="w-1/2 overflow-y-auto border-r border-white/10">
+              <div className="flex w-1/2 flex-col overflow-hidden border-r border-white/10">
                 {/* Font Size */}
-                <div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
+                <div className="flex flex-shrink-0 items-center justify-between border-b border-white/10 px-3 py-2">
                   <span className="font-mono text-[11px] text-white/70">Font Size</span>
                   <div className="flex items-center gap-1.5">
                     <button
@@ -332,17 +333,27 @@ export default function FloatingTerminal({
                     </button>
                   </div>
                 </div>
-                {workspaceCwd && workspaceToken ? (
-                  <OpenCodeSettings cwd={workspaceCwd} token={workspaceToken} />
-                ) : (
-                  <div className="flex h-full items-center justify-center px-4 text-center font-mono text-xs text-white/50">
-                    Workspace でフォルダを開くと設定が表示されます
-                  </div>
-                )}
+                <div className="min-h-0 flex-1 overflow-hidden">
+                  {workspaceCwd && workspaceToken ? (
+                    <OpenCodeSettings cwd={workspaceCwd} token={workspaceToken} />
+                  ) : (
+                    <div className="flex h-full items-center justify-center px-4 text-center font-mono text-xs text-white/50">
+                      Workspace でフォルダを開くと設定が表示されます
+                    </div>
+                  )}
+                </div>
               </div>
-              {/* Right: Shell */}
+              {/* Right: Shell (coding) or Excel Inspector (business) */}
               <div className="relative w-1/2">
-                {backNonce > 0 && session ? (
+                {isBusiness ? (
+                  workspaceCwd && workspaceToken ? (
+                    <BusinessExcelPanel cwd={workspaceCwd} token={workspaceToken} />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center bg-[#0b0b0f] px-6 text-center font-mono text-xs text-white/50">
+                      Workspace でフォルダを開くと Excel を閲覧できます
+                    </div>
+                  )
+                ) : backNonce > 0 && session ? (
                   <XtermView key={`${backNonce}-${fontNonce}`} getTicket={getTicket} cmd="shell" fontSize={fontSize} />
                 ) : (
                   <div className="flex h-full w-full items-center justify-center bg-[#0b0b0f] px-6 text-center font-mono text-xs text-white/50">
